@@ -44,6 +44,16 @@ jobs:
           Write-Host "Version $v, already released: $released"
           exit 0
 
+      - name: Check the audio library on this machine
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          python -X faulthandler -c "import sounddevice as sd; print(sd.get_portaudio_version()); print(len(sd.query_devices()), 'devices'); print('query done')"
+          Write-Host "exit code after import and query: $LASTEXITCODE"
+          python -X faulthandler -c "import sys; sys.path.insert(0, '.'); from audiochip.gui.player import LivePlayer; p = LivePlayer(); print('available', p.available, p.error); import numpy as np; print('start', p.start(np.zeros((4000, 1), dtype=np.int16), 8000)); import time; time.sleep(0.3); p.close(); print('closed')"
+          Write-Host "exit code after LivePlayer: $LASTEXITCODE"
+          exit 0
+
       - name: Run the tests on Windows
         run: python -m pytest -q tests
 
