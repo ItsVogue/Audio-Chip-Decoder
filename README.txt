@@ -152,19 +152,28 @@ NOT COVERED
 
 HOW FAR IT HAS BEEN TESTED
 --------------------------
-NOT tested on real hardware or on Windows. CH341A reading was written from
-WCH's published library header and tested against a simulated programmer.
-XGecu reading is done by minipro, the established open-source tool for
-these programmers, built here for Windows from its unmodified source; that
-build has not been run on a Windows PC or with a real programmer.
-Install.bat, the driver install, sound playback and card reading have not
-been run on Windows either.
+On Windows, automatically, for every version (GitHub's Windows build
+machine): all 124 automated checks pass; the bundled XGecu helper starts
+and answers "No programmer found"; the standalone program is built, opens
+its window, decodes a test signal, writes FLAC and MP3, and loads its USB
+and serial-port libraries; the installer is built from it.
 
-Tested here: 100 automated checks. Chip reading end to end against the
-simulated programmer (every chip type reads back exactly; only read
-commands are sent; read verification catches bad contacts). The decoder on
-real EPROM dumps and on synthetic dumps for every encoding. The app's
-screens, run without a display.
+NOT tested with real hardware by the developer: reading through any
+programmer. Each reader (CH341A with WCH's driver, CH341A with WinUSB,
+CH347, FT232H, serprog boards, XGecu) was written from the published
+description of its commands and tested against a simulation of that
+device. The first read with a real programmer is the real test. Running
+the installer, sound playback, the driver install and card reading have
+also not been exercised by the developer on a Windows desktop.
+
+Decoders:
+- 8-bit, mu-law and 16-bit: checked on real EPROM dumps.
+- OKI, IMA and Yamaha ADPCM, CVSD, uPD7759 and MSM6295: checked on test
+  data made with matching encoders, not on dumps of real chips.
+- LPC speech: the phrase finder was checked on 971 real TI vocabulary
+  words (over 99% found) and on random data. The synthesiser follows the
+  documented chip behaviour; its output has been measured, not listened to.
+  TMS5110 and TMC0281 data look the same, so try both if one sounds off.
 
 If something fails: the installer names the step that stopped; the Read
 screen says what went wrong; and errors inside the app are written to

@@ -57,8 +57,8 @@ WIRING = {
                "AD2 to its data out (pin 2), AD3 to chip select (pin 1). GND to pin 4, 3.3 V to pin 8, and tie "
                "the WP and HOLD pins (3 and 7) to 3.3 V."),
     "serprog": ("<b>Firmware:</b> the board must be running serprog firmware (pico-serprog on a Pico, "
-                "frser-duino on an Arduino). The pin assignment is fixed by that firmware. Use 3.3 V for the chip; "
-                "a 5 V Arduino needs level shifting."),
+                "frser-duino on an Arduino). The pin assignment is fixed by that firmware; its instructions "
+                "show which pin goes where."),
 }
 
 
