@@ -69,7 +69,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.coll: Collection | None = None
         self.player = Player()
-        self.settings = QSettings("ChipAudioDecoder", "ChipAudioDecoder")
+        self.settings = QSettings("AudioChipDecoder", "AudioChipDecoder")
         self._audio: np.ndarray | None = None
         self._audio_rate = 0
         self._worker: Worker | None = None

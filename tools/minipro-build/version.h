@@ -1,4 +1,4 @@
-/* generated for the Chip Audio Decoder build */
+/* generated for the Audio Chip Decoder build */
 #define VERSION "0.7.4"
 #define GIT_BRANCH "master"
 #define GIT_HASH "3e2f4911fa86f72a57ae0ace777342e75da5e7cc"

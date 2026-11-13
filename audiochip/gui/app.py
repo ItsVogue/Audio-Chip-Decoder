@@ -29,14 +29,14 @@ def main(argv: list[str] | None = None) -> int:
             where = None
         if sys.stderr:
             print(text, file=sys.stderr)
-        QMessageBox.warning(None, "Chip Audio Decoder",
+        QMessageBox.warning(None, "Audio Chip Decoder",
                             f"Something went wrong:\n\n{exc_type.__name__}: {exc}\n\n"
                             + (f"Details were saved to:\n{where}" if where else ""))
 
     sys.excepthook = report
     app = QApplication(argv)
-    app.setApplicationName("Chip Audio Decoder")
-    app.setOrganizationName("ChipAudioDecoder")
+    app.setApplicationName("Audio Chip Decoder")
+    app.setOrganizationName("AudioChipDecoder")
     apply_dark(app)
     from pathlib import Path
     from PySide6.QtGui import QIcon

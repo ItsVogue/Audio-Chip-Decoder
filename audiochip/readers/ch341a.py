@@ -30,7 +30,7 @@ CS_D0 = 0x80                # use pin D0 as chip select, driven low for the tran
 
 def driver_cache_dir() -> Path:
     base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".cache")
-    return base / "ChipAudioDecoder" / "driver"
+    return base / "AudioChipDecoder" / "driver"
 
 
 class DllTransport:
@@ -229,11 +229,11 @@ class Ch341a:
 
 
 def open_reader() -> Ch341a:
-    """Open the programmer. With CHIPAUDIO_SIM set to a file, use a simulated chip holding that file."""
-    sim = os.environ.get("CHIPAUDIO_SIM")
+    """Open the programmer. With AUDIOCHIP_SIM set to a file, use a simulated chip holding that file."""
+    sim = os.environ.get("AUDIOCHIP_SIM")
     if sim:
         data = Path(sim).read_bytes() if Path(sim).is_file() else b""
-        kind = os.environ.get("CHIPAUDIO_SIM_KIND", "spi_flash") if data else "empty"
+        kind = os.environ.get("AUDIOCHIP_SIM_KIND", "spi_flash") if data else "empty"
         cap = max(len(data) - 1, 1).bit_length()
         return Ch341a(SimTransport(data, kind, bytes([0xEF, 0x40, cap])))
     return Ch341a(DllTransport())
@@ -252,7 +252,7 @@ def install_driver(progress: Progress | None = None) -> Path:
     zpath = target / "CH341PAR.ZIP"
     if progress:
         progress(0, 0, "Downloading the driver from wch-ic.com")
-    req = urllib.request.Request(DRIVER_ZIP_URL, headers={"User-Agent": "ChipAudioDecoder"})
+    req = urllib.request.Request(DRIVER_ZIP_URL, headers={"User-Agent": "AudioChipDecoder"})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             blob = r.read()

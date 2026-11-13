@@ -63,7 +63,7 @@ def relaunch_as_admin() -> bool:
     """Start a second copy of the app with administrator rights. True if Windows agreed."""
     if sys.platform != "win32":
         return False
-    args = "-m chipaudio" if not getattr(sys, "frozen", False) else ""
+    args = "-m audiochip" if not getattr(sys, "frozen", False) else ""
     rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, args, os.getcwd(), 1)
     return rc > 32
 

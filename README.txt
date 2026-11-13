@@ -1,4 +1,4 @@
-CHIP AUDIO DECODER 0.3.0
+audio chip decoder 0.3.0
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports WAV files.
@@ -14,13 +14,13 @@ INSTALL
    - If Windows shows a security prompt, choose "More info" then
      "Run anyway", or "Run".
    - No administrator rights needed. Installs for your user only, into
-     %LOCALAPPDATA%\ChipAudioDecoder
+     %LOCALAPPDATA%\AudioChipDecoder
    - Needs internet the first time: it fetches Python if you do not have
      it, plus NumPy and Qt. About 150 MB.
-3. Start "Chip Audio Decoder" from the desktop or the Start menu.
+3. Start "Audio Chip Decoder" from the desktop or the Start menu.
 
 Remove it with  Uninstall.bat .  Build-Exe.bat (after installing) makes a
-standalone folder, dist\ChipAudioDecoder, for a PC with no internet.
+standalone folder, dist\AudioChipDecoder, for a PC with no internet.
 
 
 READ A CHIP
@@ -122,12 +122,12 @@ screens, run without a display.
 
 If something fails: the installer names the step that stopped; the Read
 screen says what went wrong; and errors inside the app are written to
-%APPDATA%\ChipAudioDecoder\error.log
+%APPDATA%\AudioChipDecoder\error.log
 
 
 LICENCES
 --------
-minipro (chipaudio\readers\xgecu\minipro.exe and its chip database) is
+minipro (audiochip\readers\xgecu\minipro.exe and its chip database) is
 free software under the GNU GPL version 3 or later, from
 https://gitlab.com/DavidGriffith/minipro . Its licence is next to it, and
 its source and build notes are in tools\minipro-build. The app runs it as

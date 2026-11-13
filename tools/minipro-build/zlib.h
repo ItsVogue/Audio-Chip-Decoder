@@ -1,4 +1,4 @@
-/* Minimal stand-in for zlib, for the Chip Audio Decoder build of minipro.
+/* Minimal stand-in for zlib, for the Audio Chip Decoder build of minipro.
  * minipro uses zlib only to unpack T56/T76 algorithm files, which this build
  * does not ship. Inflate therefore reports an error, and those two programmers
  * are reported as unsupported; TL866A/CS, TL866II Plus and T48 need none of it. */

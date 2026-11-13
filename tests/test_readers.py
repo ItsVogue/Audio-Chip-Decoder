@@ -2,11 +2,11 @@
 import numpy as np
 import pytest
 
-from chipaudio.readers import Cancelled, ReaderError
-from chipaudio.readers.base import read_verified
-from chipaudio.readers.ch341a import Ch341a, SimTransport
-from chipaudio.readers import cards
-from chipaudio.readers.chips import (I2C_TYPES, SPI_EEPROM_TYPES, i2c_chip, spi_eeprom_chip, spi_flash_chip,
+from audiochip.readers import Cancelled, ReaderError
+from audiochip.readers.base import read_verified
+from audiochip.readers.ch341a import Ch341a, SimTransport
+from audiochip.readers import cards
+from audiochip.readers.chips import (I2C_TYPES, SPI_EEPROM_TYPES, i2c_chip, spi_eeprom_chip, spi_flash_chip,
                                      spi_flash_from_id)
 
 READ_ONLY_OPCODES = {0x03, 0x0B, 0x13, 0x9F}        # read, read with address bit 8, 4-byte read, read ID
@@ -51,7 +51,7 @@ def test_large_flash_uses_four_byte_addresses():
     data = _bytes(40_000)
     sim = SimTransport(data, "spi_flash")
     assert spi_flash_chip(32 << 20).addr_bytes == 4 and spi_flash_chip(16 << 20).addr_bytes == 3
-    from chipaudio.readers.chips import ChipInfo
+    from audiochip.readers.chips import ChipInfo
     out = Ch341a(sim).read(ChipInfo("spi_flash", "test", 20_000, addr_bytes=4))
     assert out == data[:20_000] and 0x13 in sim.opcodes and 0x03 not in sim.opcodes
 
@@ -121,7 +121,7 @@ def test_card_image_read_respects_limit(tmp_path):
 import sys                                                               # noqa: E402
 from pathlib import Path                                                 # noqa: E402
 
-from chipaudio.readers import NoDevice, xgecu                             # noqa: E402
+from audiochip.readers import NoDevice, xgecu                             # noqa: E402
 
 FAKE = f'"{sys.executable}" "{Path(__file__).with_name("fake_minipro.py")}"'
 
@@ -130,7 +130,7 @@ FAKE = f'"{sys.executable}" "{Path(__file__).with_name("fake_minipro.py")}"'
 def fake_xgecu(tmp_path, monkeypatch):
     data = _bytes(262144, 9)
     (tmp_path / "chip.bin").write_bytes(data)
-    monkeypatch.setenv("CHIPAUDIO_MINIPRO", FAKE)
+    monkeypatch.setenv("AUDIOCHIP_MINIPRO", FAKE)
     monkeypatch.setenv("FAKE_MINIPRO_DATA", str(tmp_path / "chip.bin"))
     monkeypatch.setenv("FAKE_MINIPRO_LOG", str(tmp_path / "calls.log"))
     monkeypatch.setenv("FAKE_MINIPRO_NEED_DB", "1")

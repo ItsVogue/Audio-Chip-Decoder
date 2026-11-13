@@ -68,7 +68,7 @@ def _summary(coll: Collection) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="chipaudio", description=f"{APP_NAME} {__version__}")
+    ap = argparse.ArgumentParser(prog="audiochip", description=f"{APP_NAME} {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, helptext in (("analyze", "identify the encoding and speed, without writing anything"),
                            ("convert", "identify, decode and write WAV files plus a report")):

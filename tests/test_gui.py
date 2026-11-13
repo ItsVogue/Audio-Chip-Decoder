@@ -10,10 +10,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QEventLoop, QSettings, QTimer                 # noqa: E402
 from PySide6.QtWidgets import QApplication                              # noqa: E402
 
-from chipaudio.codecs import Hypothesis                                 # noqa: E402
-from chipaudio.export import ExportOptions, export                      # noqa: E402
-from chipaudio.gui.main_window import MainWindow                        # noqa: E402
-from chipaudio import profiles                                          # noqa: E402
+from audiochip.codecs import Hypothesis                                 # noqa: E402
+from audiochip.export import ExportOptions, export                      # noqa: E402
+from audiochip.gui.main_window import MainWindow                        # noqa: E402
+from audiochip import profiles                                          # noqa: E402
 from conftest import encode                                             # noqa: E402
 
 
@@ -36,7 +36,7 @@ def _wait(win, ms=30000):
 def win(app, tmp_path, monkeypatch, voice, music):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "cfg"))
-    QSettings("ChipAudioDecoder", "ChipAudioDecoder").clear()
+    QSettings("AudioChipDecoder", "AudioChipDecoder").clear()
     for name, sig in (("Dialog", voice), ("Music", music)):
         body = b"\x00" * 4 + encode(sig, "mulaw_inv")[:59996 - 5000] + b"\x00" * 5000
         (tmp_path / "set" / name).mkdir(parents=True)
@@ -117,7 +117,7 @@ def test_unreadable_and_empty_inputs_do_not_crash(app, tmp_path):
     (tmp_path / "junk" / "bad.hex").write_text(":10000000ZZ\n")
     (tmp_path / "junk" / "blank.bin").write_bytes(b"\xFF" * 4096)
     w = MainWindow()
-    from chipaudio.collection import build
+    from audiochip.collection import build
     coll = build([tmp_path / "junk"])
     assert len(coll.errors) == 1 and coll.tracks[0].chips[0].role == "blank" and coll.hyp is None
     w.coll = coll
@@ -129,12 +129,12 @@ def test_unreadable_and_empty_inputs_do_not_crash(app, tmp_path):
 
 def test_read_a_chip_inside_the_app_then_decode(app, tmp_path, monkeypatch, voice):
     """Simulated programmer holding a mu-law recording: detect, read twice, save, decode."""
-    from chipaudio.gui.read_dialog import ReadDialog
+    from audiochip.gui.read_dialog import ReadDialog
     body = encode(voice, "mulaw_inv")[:60000] + b"\x00" * 5536             # a 64 KB chip, padded at the end
     chipfile = tmp_path / "chip.bin"
     chipfile.write_bytes(body)
-    monkeypatch.setenv("CHIPAUDIO_SIM", str(chipfile))
-    settings = QSettings("ChipAudioDecoder", "ChipAudioDecoderTest")
+    monkeypatch.setenv("AUDIOCHIP_SIM", str(chipfile))
+    settings = QSettings("AudioChipDecoder", "AudioChipDecoderTest")
     settings.setValue("dump_dir", str(tmp_path / "dumps"))
     settings.setValue("reader", "ch341a")
     dlg = ReadDialog(settings)
@@ -159,11 +159,11 @@ def test_read_a_chip_inside_the_app_then_decode(app, tmp_path, monkeypatch, voic
 
 
 def test_blank_and_i2c_reads_in_the_dialog(app, tmp_path, monkeypatch):
-    from chipaudio.gui.read_dialog import ReadDialog
-    settings = QSettings("ChipAudioDecoder", "ChipAudioDecoderTest")
+    from audiochip.gui.read_dialog import ReadDialog
+    settings = QSettings("AudioChipDecoder", "AudioChipDecoderTest")
     settings.setValue("dump_dir", str(tmp_path / "dumps"))
     settings.setValue("reader", "ch341a")
-    monkeypatch.setenv("CHIPAUDIO_SIM", str(tmp_path / "nothing-here.bin"))        # empty socket
+    monkeypatch.setenv("AUDIOCHIP_SIM", str(tmp_path / "nothing-here.bin"))        # empty socket
     dlg = ReadDialog(settings)
     dlg._detect()
     _wait(dlg)
@@ -174,8 +174,8 @@ def test_blank_and_i2c_reads_in_the_dialog(app, tmp_path, monkeypatch):
 
     data = bytes(range(256)) * 128                                                # a 24C256
     (tmp_path / "ee.bin").write_bytes(data)
-    monkeypatch.setenv("CHIPAUDIO_SIM", str(tmp_path / "ee.bin"))
-    monkeypatch.setenv("CHIPAUDIO_SIM_KIND", "i2c")
+    monkeypatch.setenv("AUDIOCHIP_SIM", str(tmp_path / "ee.bin"))
+    monkeypatch.setenv("AUDIOCHIP_SIM_KIND", "i2c")
     dlg = ReadDialog(settings)
     dlg.family.setCurrentIndex(dlg.family.findData("i2c_eeprom"))
     dlg.variant.setCurrentIndex(8)
@@ -189,14 +189,14 @@ def test_blank_and_i2c_reads_in_the_dialog(app, tmp_path, monkeypatch):
 def test_read_a_parallel_eprom_through_an_xgecu_programmer(app, tmp_path, monkeypatch, music):
     import sys
     from pathlib import Path
-    from chipaudio.gui.read_dialog import ReadDialog
+    from audiochip.gui.read_dialog import ReadDialog
     body = (encode(music, "u8") * 3)[:262144]
     (tmp_path / "eprom.bin").write_bytes(body)
     fake = Path(__file__).with_name("fake_minipro.py")
-    monkeypatch.setenv("CHIPAUDIO_MINIPRO", f'"{sys.executable}" "{fake}"')
+    monkeypatch.setenv("AUDIOCHIP_MINIPRO", f'"{sys.executable}" "{fake}"')
     monkeypatch.setenv("FAKE_MINIPRO_DATA", str(tmp_path / "eprom.bin"))
     monkeypatch.setenv("FAKE_MINIPRO_MODEL", "tl866ii: TL866II+")
-    settings = QSettings("ChipAudioDecoder", "ChipAudioDecoderTest")
+    settings = QSettings("AudioChipDecoder", "AudioChipDecoderTest")
     settings.setValue("dump_dir", str(tmp_path / "dumps"))
     settings.setValue("reader", "xgecu")
     dlg = ReadDialog(settings)

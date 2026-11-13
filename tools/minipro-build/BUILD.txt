@@ -1,4 +1,4 @@
-minipro.exe in chipaudio/readers/xgecu is an unmodified build of minipro
+minipro.exe in audiochip/readers/xgecu is an unmodified build of minipro
 (https://gitlab.com/DavidGriffith/minipro), commit
 3e2f4911fa86f72a57ae0ace777342e75da5e7cc, licensed GPL-3.0-or-later.
 Its source is in minipro-source-3e2f4911.tar.gz in this folder.
@@ -17,5 +17,5 @@ The three small files here stand in for things the compiler lacked:
   cad_compat.h  supplies stpcpy().
 version.h is the generated version header used for the build.
 
-Chip Audio Decoder runs minipro.exe as a separate program. infoic.xml and
+Audio Chip Decoder runs minipro.exe as a separate program. infoic.xml and
 logicic.xml are minipro's chip database, unchanged.

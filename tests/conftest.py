@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from chipaudio.codecs import CODECS, LAYOUTS, oki_encode
+from audiochip.codecs import CODECS, LAYOUTS, oki_encode
 
 
 def lowpass(x, frac):

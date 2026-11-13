@@ -47,11 +47,19 @@ def config_dir() -> Path:
         base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    return base / "ChipAudioDecoder"
+    return base / "AudioChipDecoder"
 
 
 def _file() -> Path:
-    return config_dir() / "profiles.json"
+    new = config_dir() / "profiles.json"
+    old = config_dir().with_name("Chip" + "AudioDecoder") / "profiles.json"     # the app's earlier name
+    if not new.exists() and old.exists():
+        try:
+            new.parent.mkdir(parents=True, exist_ok=True)
+            new.write_bytes(old.read_bytes())
+        except OSError:
+            pass
+    return new
 
 
 def load_user() -> list[Profile]:

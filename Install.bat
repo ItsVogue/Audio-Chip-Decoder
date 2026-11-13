@@ -1,21 +1,21 @@
 @echo off
 setlocal EnableExtensions
-title Chip Audio Decoder - Install
+title Audio Chip Decoder - Install
 cd /d "%~dp0"
 
-set "APPDIR=%LOCALAPPDATA%\ChipAudioDecoder"
+set "APPDIR=%LOCALAPPDATA%\AudioChipDecoder"
 set "PYURL=https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 set "PYSETUP=%TEMP%\python-3.12.10-amd64.exe"
 set "PYEXE="
 
 echo.
-echo   Chip Audio Decoder - installer
+echo   Audio Chip Decoder - installer
 echo   ------------------------------
 echo   Installs for this Windows user only. No administrator rights are needed.
 echo   Program folder: %APPDIR%
 echo.
 
-if not exist "%~dp0chipaudio\__init__.py" goto notunzipped
+if not exist "%~dp0audiochip\__init__.py" goto notunzipped
 
 rem ---- Step 1: find a 64-bit Python, version 3.10 or newer ----------------
 echo   [1/5] Looking for Python...
@@ -48,10 +48,16 @@ if not defined PYEXE goto nopython
 :havepy
 echo         Using: %PYEXE%
 
+rem ---- Remove an install made under the app's earlier name ---------------
+if exist "%LOCALAPPDATA%\ChipAudioDecoder\app" echo         Removing the earlier install, which had a different name...
+if exist "%LOCALAPPDATA%\ChipAudioDecoder\app" rmdir /s /q "%LOCALAPPDATA%\ChipAudioDecoder"
+if exist "%USERPROFILE%\Desktop\Chip Audio Decoder.lnk" del "%USERPROFILE%\Desktop\Chip Audio Decoder.lnk"
+if exist "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Chip Audio Decoder.lnk" del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Chip Audio Decoder.lnk"
+
 rem ---- Step 2: copy the program ------------------------------------------
 echo   [2/5] Copying the program...
 if not exist "%APPDIR%\app" mkdir "%APPDIR%\app"
-robocopy "%~dp0chipaudio" "%APPDIR%\app\chipaudio" /MIR /XD __pycache__ /NFL /NDL /NJH /NJS /NP >nul
+robocopy "%~dp0audiochip" "%APPDIR%\app\audiochip" /MIR /XD __pycache__ /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto copyfail
 copy /y "%~dp0requirements.txt" "%APPDIR%\app\requirements.txt" >nul
 if errorlevel 1 goto copyfail
@@ -67,7 +73,7 @@ echo   [4/5] Downloading components (about 120 MB the first time)...
 "%APPDIR%\venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r "%APPDIR%\app\requirements.txt"
 if errorlevel 1 goto pipfail
 pushd "%APPDIR%\app"
-"%APPDIR%\venv\Scripts\python.exe" -c "import numpy, PySide6.QtWidgets, chipaudio.gui.main_window"
+"%APPDIR%\venv\Scripts\python.exe" -c "import numpy, PySide6.QtWidgets, audiochip.gui.main_window"
 set "TESTRESULT=%ERRORLEVEL%"
 popd
 if not "%TESTRESULT%"=="0" goto testfail
@@ -75,14 +81,14 @@ if not "%TESTRESULT%"=="0" goto testfail
 rem ---- Step 5: shortcuts --------------------------------------------------
 echo   [5/5] Creating shortcuts...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\make-shortcuts.ps1" -AppDir "%APPDIR%"
-if errorlevel 1 echo         Shortcuts could not be created. Start the app with "%APPDIR%\Chip Audio Decoder.bat" instead.
+if errorlevel 1 echo         Shortcuts could not be created. Start the app with "%APPDIR%\Audio Chip Decoder.bat" instead.
 
-> "%APPDIR%\Chip Audio Decoder.bat" echo @echo off
->> "%APPDIR%\Chip Audio Decoder.bat" echo cd /d "%APPDIR%\app"
->> "%APPDIR%\Chip Audio Decoder.bat" echo start "" "%APPDIR%\venv\Scripts\pythonw.exe" -m chipaudio %%*
+> "%APPDIR%\Audio Chip Decoder.bat" echo @echo off
+>> "%APPDIR%\Audio Chip Decoder.bat" echo cd /d "%APPDIR%\app"
+>> "%APPDIR%\Audio Chip Decoder.bat" echo start "" "%APPDIR%\venv\Scripts\pythonw.exe" -m audiochip %%*
 
 echo.
-echo   Done. Start "Chip Audio Decoder" from the desktop or the Start menu.
+echo   Done. Start "Audio Chip Decoder" from the desktop or the Start menu.
 echo.
 pause
 exit /b 0
@@ -107,7 +113,7 @@ goto fail
 :copyfail
 echo.
 echo   The program files could not be copied to %APPDIR%.
-echo   Close Chip Audio Decoder if it is running, then run Install.bat again.
+echo   Close Audio Chip Decoder if it is running, then run Install.bat again.
 goto fail
 
 :venvfail

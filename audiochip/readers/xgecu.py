@@ -33,7 +33,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x07")
 
 
 def _tool() -> list[str]:
-    override = os.environ.get("CHIPAUDIO_MINIPRO")
+    override = os.environ.get("AUDIOCHIP_MINIPRO")
     if override:
         return shlex.split(override)
     if sys.platform == "win32":
@@ -127,7 +127,7 @@ def read(device: str, model_opt: str | None = None, progress: Progress | None = 
     check_id=False passes -x, so no ID request is made. On EPROMs an ID request puts 12 V on
     address pin A9, which a plain read never needs.
     """
-    tmp = Path(tempfile.mkdtemp(prefix="chipaudio_x_")) / "read.bin"
+    tmp = Path(tempfile.mkdtemp(prefix="audiochip_x_")) / "read.bin"
     args = _tool() + ["-p", device, "-r", str(tmp), "-z"] + ([] if check_id else ["-x"])
     try:
         proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=_env(),

@@ -1,6 +1,6 @@
 """Regression against the real Jaws 93 EPROM set and the WAV hashes from the original conversion.
 
-Skipped unless CHIPAUDIO_JAWS_DIR (the extracted archive) and CHIPAUDIO_JAWS_MANIFEST are set.
+Skipped unless AUDIOCHIP_JAWS_DIR (the extracted archive) and AUDIOCHIP_JAWS_MANIFEST are set.
 """
 import hashlib
 import json
@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from chipaudio.codecs import Hypothesis, decode
-from chipaudio.collection import build, track_audio
-from chipaudio.export import wav_bytes
+from audiochip.codecs import Hypothesis, decode
+from audiochip.collection import build, track_audio
+from audiochip.export import wav_bytes
 
-ROOT = os.environ.get("CHIPAUDIO_JAWS_DIR")
-MANIFEST = os.environ.get("CHIPAUDIO_JAWS_MANIFEST")
+ROOT = os.environ.get("AUDIOCHIP_JAWS_DIR")
+MANIFEST = os.environ.get("AUDIOCHIP_JAWS_MANIFEST")
 pytestmark = pytest.mark.skipif(not (ROOT and MANIFEST), reason="Jaws test data not configured")
 MULAW = Hypothesis("mulaw_inv")
 

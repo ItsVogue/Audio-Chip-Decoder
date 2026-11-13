@@ -26,7 +26,7 @@ except ImportError:                    # pragma: no cover - other systems
 
 class Player:
     def __init__(self):
-        self._dir = Path(tempfile.mkdtemp(prefix="chipaudio_"))
+        self._dir = Path(tempfile.mkdtemp(prefix="audiochip_"))
         self._n = 0
         self._proc: subprocess.Popen | None = None
         self._t0 = 0.0

@@ -5,13 +5,13 @@ import wave
 import numpy as np
 import pytest
 
-from chipaudio.codecs import CODECS, Hypothesis, decode
-from chipaudio.collection import build, move_chip, track_audio
-from chipaudio.detect import detect
-from chipaudio.export import ExportOptions, export, wav_bytes
-from chipaudio.ingest import DumpError, load_dump, parse_intel_hex, parse_srec
-from chipaudio.rate import estimate, measure
-from chipaudio.structure import analyse_structure
+from audiochip.codecs import CODECS, Hypothesis, decode
+from audiochip.collection import build, move_chip, track_audio
+from audiochip.detect import detect
+from audiochip.export import ExportOptions, export, wav_bytes
+from audiochip.ingest import DumpError, load_dump, parse_intel_hex, parse_srec
+from audiochip.rate import estimate, measure
+from audiochip.structure import analyse_structure
 from conftest import encode
 
 SIMPLE = [c.id for c in CODECS.values() if c.family != "adpcm"]

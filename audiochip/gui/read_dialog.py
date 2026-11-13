@@ -51,7 +51,7 @@ class ReadDialog(QDialog):
         self._drives: list[cards.Drive] = []
 
         docs = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) or str(Path.home())
-        self._base = Path(settings.value("dump_dir", str(Path(docs) / "Chip Audio Decoder" / "Dumps")))
+        self._base = Path(settings.value("dump_dir", str(Path(docs) / "Audio Chip Decoder" / "Dumps")))
 
         lay = QVBoxLayout(self)
         lay.setSpacing(10)
