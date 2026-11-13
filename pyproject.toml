@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chipaudio"
+version = "0.3.0"
+description = "Chip Audio Decoder: find and decode audio stored on memory chips"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+gui = ["PySide6-Essentials>=6.6"]
+
+[project.scripts]
+chipaudio = "chipaudio.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["chipaudio*"]
+
+[tool.setuptools.package-data]
+chipaudio = ["gui/*.ico", "readers/xgecu/*"]

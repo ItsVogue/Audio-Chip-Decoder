@@ -1,0 +1,21 @@
+minipro.exe in chipaudio/readers/xgecu is an unmodified build of minipro
+(https://gitlab.com/DavidGriffith/minipro), commit
+3e2f4911fa86f72a57ae0ace777342e75da5e7cc, licensed GPL-3.0-or-later.
+Its source is in minipro-source-3e2f4911.tar.gz in this folder.
+
+Built for 64-bit Windows with Zig's C compiler:
+
+  zig cc -target x86_64-windows-gnu -O2 -s -I . -include cad_compat.h \
+      -DSHARE_INSTDIR='"."' <all src/*.c except usb_nix.c> \
+      -lsetupapi -lwinusb -lshell32 -lole32 -o minipro.exe
+
+The three small files here stand in for things the compiler lacked:
+  zlib.h        zlib is only used for T56/T76 algorithm files, which are not
+                shipped; inflate reports an error, so T56 and T76 do not work
+                in this build. TL866A/CS, TL866II Plus and T48 need none of it.
+  Shlobj.h      forwards to shlobj.h (file-name case).
+  cad_compat.h  supplies stpcpy().
+version.h is the generated version header used for the build.
+
+Chip Audio Decoder runs minipro.exe as a separate program. infoic.xml and
+logicic.xml are minipro's chip database, unchanged.
