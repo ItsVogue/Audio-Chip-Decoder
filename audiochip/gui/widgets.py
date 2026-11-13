@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
-from PySide6.QtWidgets import QLabel, QSizePolicy, QWidget
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QImage, QPainter, QPen
+from PySide6.QtWidgets import QDialog, QFrame, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 INK = QColor("#E6E9EE")
 MUTED = QColor("#98A2B3")
@@ -46,7 +46,7 @@ class WaveformView(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(110)
+        self.setMinimumHeight(84)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._x: np.ndarray | None = None
         self._marks: list[tuple[int, str]] = []
@@ -170,7 +170,7 @@ class SpectrogramView(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(120)
+        self.setMinimumHeight(104)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._img: QImage | None = None
         self._buf = None
@@ -253,3 +253,83 @@ def hex_page(data: bytes, offset: int, length: int = 2048) -> str:
 
 
 __all__ = ["Chip", "WaveformView", "SpectrogramView", "hex_page", "CONFIDENCE_STYLE"]
+
+
+class FitDialog(QDialog):
+    """A dialog that never opens larger than the screen: its contents scroll when there is not room for all of it."""
+
+    def body(self) -> QVBoxLayout:
+        """The layout to fill, in place of QVBoxLayout(self)."""
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._scroll = QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._inner = QWidget()
+        self._scroll.setWidget(self._inner)
+        outer.addWidget(self._scroll)
+        return QVBoxLayout(self._inner)
+
+    def _room(self) -> QSize:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return QSize(1600, 1000)
+        g = screen.availableGeometry()
+        return QSize(g.width() - 24, g.height() - 64)          # leave space for the title bar and borders
+
+    def sizeHint(self) -> QSize:
+        if not hasattr(self, "_inner"):
+            return super().sizeHint()
+        want = self._inner.sizeHint().expandedTo(self._inner.minimumSizeHint())
+        room = self._room()
+        w = max(want.width(), self.minimumWidth()) + 2
+        h = want.height() + 2
+        bar = self._scroll.verticalScrollBar().sizeHint().width()
+        if h > room.height():
+            w += bar                                           # room for the scroll bar that will appear
+        return QSize(min(w, room.width()), min(h, room.height()))
+
+    def fit(self) -> None:
+        room = self._room()
+        if self.minimumWidth() > room.width():
+            self.setMinimumWidth(room.width())
+        self.resize(self.sizeHint())
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is not None and self.isVisible():
+            g = screen.availableGeometry()
+            f = self.frameGeometry()
+            self.move(min(max(f.x(), g.x()), max(g.right() - f.width(), g.x())),
+                      min(max(f.y(), g.y()), max(g.bottom() - f.height(), g.y())))
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not getattr(self, "_fitted", False):
+            self._fitted = True
+            self.fit()
+
+
+class ElideLabel(QLabel):
+    """A one-line label that shortens its text with "..." to fit whatever width it is given."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full = ""
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setMinimumWidth(48)
+
+    def set_full_text(self, text: str) -> None:
+        self._full = text
+        self._refit()
+
+    def full_text(self) -> str:
+        return self._full
+
+    def _refit(self) -> None:
+        super().setText(self.fontMetrics().elidedText(self._full, Qt.ElideRight, max(self.width() - 2, 20)))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._refit()
+
+    def sizeHint(self) -> QSize:
+        return QSize(self.fontMetrics().horizontalAdvance(self._full) + 6, super().sizeHint().height())

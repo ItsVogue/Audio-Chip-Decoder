@@ -1,4 +1,4 @@
-AUDIO CHIP DECODER 0.4.3
+AUDIO CHIP DECODER 0.4.4
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports audio files.
@@ -86,6 +86,10 @@ The app only ever sends read commands. It cannot erase or write a chip.
 
 DECODE AND EXPORT
 -----------------
+- The app starts filling the screen. Restored to a window, it is sized to
+  fit the screen; in a small window the main view and the dialogs scroll
+  instead of being cut off. The Details panel always starts closed, and
+  opens as its own window when there is no room beside the main view.
 - The headline states the encoding and speed in force, with a confidence
   level for the encoding. Press Play.
 - "Sounds in the selection" lists the separate sounds on the chip. Chips

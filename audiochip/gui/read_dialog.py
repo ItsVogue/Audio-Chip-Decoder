@@ -19,7 +19,7 @@ from ..readers.serprog import list_ports
 from ..readers.chips import (I2C_TYPES, SPI_EEPROM_TYPES, SPI_FLASH_SIZES, ChipInfo, chip_from_marking,
                              human_size, i2c_chip, spi_eeprom_chip, spi_flash_chip)
 from ..structure import analyse_structure
-from .widgets import Chip
+from .widgets import FitDialog, Chip
 from .worker import Worker
 
 FAMILY_HINT = {
@@ -66,7 +66,7 @@ def _safe(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .") or "Track"
 
 
-class ReadDialog(QDialog):
+class ReadDialog(FitDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Read a chip")
@@ -82,7 +82,7 @@ class ReadDialog(QDialog):
         docs = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) or str(Path.home())
         self._base = Path(settings.value("dump_dir", str(Path(docs) / "Audio Chip Decoder" / "Dumps")))
 
-        lay = QVBoxLayout(self)
+        lay = self.body()
         lay.setSpacing(10)
 
         # ---- source
@@ -435,7 +435,7 @@ class ReadDialog(QDialog):
             self._fill_drives()
         else:
             self._check_reader()
-        QTimer.singleShot(0, self.adjustSize)
+        QTimer.singleShot(0, self.fit)
 
     def _busy(self, on: bool, text: str = "") -> None:
         for w in (self.read_btn, self.detect_btn, self.recheck_btn, self.driver_btn, self.decode_btn,

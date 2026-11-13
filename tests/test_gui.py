@@ -504,3 +504,52 @@ def test_chip_markings_and_packages_in_the_read_dialog(app, tmp_path, monkeypatc
     assert d.x_list.count() and all("SO" in d.x_list.item(i).text() for i in range(d.x_list.count()))
     d.open_after = []
     d.close()
+
+
+# ------------------------------------------------------------------ 0.4.4 window sizing
+def test_starts_maximised_with_details_hidden_and_a_windowed_size_that_fits(app, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    s = QSettings("AudioChipDecoder", "AudioChipDecoder")
+    s.setValue("details_open", True)                       # left behind by versions that reopened the panel
+    w = MainWindow()
+    room = w._screen_room()
+    assert w.width() <= room.width() and w.height() <= room.height()       # the size it has when not maximised
+    w.show_fitted()
+    assert w.isMaximized() and w.dock.isHidden()
+    w._open_details()
+    assert not w.dock.isHidden()
+    w._toggle_details()
+    assert w.dock.isHidden()
+    w.close()
+
+
+def test_details_panel_floats_when_the_screen_has_no_room_beside(win, monkeypatch):
+    from PySide6.QtCore import QRect
+    monkeypatch.setattr(win, "_screen_room", lambda: QRect(0, 0, 1280, 700))
+    win.showNormal()
+    win.resize(1100, 640)
+    win._show_details(1)
+    assert win.dock.isFloating() and win.dock.width() <= 1240 and win.dock.height() <= 620
+    assert win.width() <= 1280 and win.tabs.currentIndex() == 1
+    win.dock.hide()
+
+
+def test_dialogs_shrink_to_a_small_screen_and_scroll(app, tmp_path, monkeypatch, win):
+    from PySide6.QtCore import QSize
+    from audiochip.gui.dialogs import ExportDialog, ListeningCheck
+    from audiochip.gui.read_dialog import ReadDialog
+    from audiochip.gui.widgets import FitDialog
+    monkeypatch.setattr(FitDialog, "_room", lambda self: QSize(700, 420))
+    monkeypatch.setenv("AUDIOCHIP_SIM", str(tmp_path / "none.bin"))
+    dialogs = [ReadDialog(QSettings("AudioChipDecoder", "AudioChipDecoder")),
+               ListeningCheck(win._audio, [], 32000, FakePlayer(), win, live=FakeLive(False)),
+               ExportDialog(str(tmp_path / "out"), False, "summary", win)]
+    for d in dialogs:
+        d.show()
+        app.processEvents()
+        assert d.width() <= 700 and d.height() <= 420, type(d).__name__
+        assert d._inner.sizeHint().height() > d.height()                   # more than fits: it scrolls
+        assert d._scroll.verticalScrollBar().maximum() > 0
+        if hasattr(d, "open_after"):
+            d.open_after = []
+        d.reject()

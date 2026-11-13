@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))
     win = MainWindow()
-    win.show()
+    win.show_fitted()
     paths = [a for a in argv[1:] if not a.startswith("-")]
     if paths:
         win.load_paths(paths)

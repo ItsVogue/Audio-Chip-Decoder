@@ -8,9 +8,9 @@ import os
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDockWidget, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QScrollArea, QButtonGroup, QCheckBox, QComboBox, QDockWidget, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
                                QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
                                QPushButton, QRadioButton, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTabWidget,
                                QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -25,7 +25,7 @@ from ..rate import STANDARD_RATES
 from .dialogs import HELP_HTML, ExportDialog, ListeningCheck, TextDialog
 from .player import Player, why_no_sound
 from .read_dialog import ReadDialog
-from .widgets import Chip, SpectrogramView, WaveformView, hex_page
+from .widgets import Chip, ElideLabel, SpectrogramView, WaveformView, hex_page
 from .worker import Worker
 
 ROLE_TEXT = {"chip": "in track", "duplicate": "duplicate", "prejoined": "joined copy", "blank": "blank"}
@@ -68,7 +68,6 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {__version__}")
-        self.resize(1400, 860)
         self.setAcceptDrops(True)
         self.coll: Collection | None = None
         self.player = Player()
@@ -89,6 +88,27 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._tick)
         self.log(f"{APP_NAME} {__version__} started.")
         self._set_loaded(False)
+        self._fit_to_screen()
+
+    # ------------------------------------------------------------- window size
+    def _screen_room(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        return screen.availableGeometry() if screen else None
+
+    def _fit_to_screen(self) -> None:
+        """Set the size the window has when it is not maximised: always within the screen, and centred."""
+        room = self._screen_room()
+        if room is None:
+            self.resize(1400, 860)
+            return
+        frame = 40                                           # title bar and borders
+        self.resize(min(1400, room.width() - 16), min(860, room.height() - frame))
+        self.move(room.x() + max((room.width() - self.width()) // 2, 0),
+                  room.y() + max((room.height() - self.height() - frame) // 2, 0))
+
+    def show_fitted(self) -> None:
+        """Start filling the screen. Restoring the window gives the fitted size set above."""
+        self.showMaximized()
 
     # ------------------------------------------------------------------ build UI
     def _build_toolbar(self):
@@ -247,12 +267,15 @@ class MainWindow(QMainWindow):
         self.why_btn.clicked.connect(lambda: self._show_details(0))
         chips.addWidget(self.enc_chip)
         chips.addWidget(self.speed_chip)
-        chips.addWidget(self.why_btn)
         chips.addStretch(1)
         self.notice = QLabel()
         self.notice.setWordWrap(True)
         self.notice.setProperty("warning", True)
-        cl.addWidget(self.sel_label)
+        caption = QHBoxLayout()                 # the link sits up here so the row of badges stays narrow
+        caption.addWidget(self.sel_label)
+        caption.addStretch(1)
+        caption.addWidget(self.why_btn)
+        cl.addLayout(caption)
         cl.addWidget(self.headline)
         cl.addLayout(chips)
         cl.addWidget(self.notice)
@@ -290,6 +313,8 @@ class MainWindow(QMainWindow):
         al.addWidget(self.about_body)
         self._about_rows: list[tuple[str, str, str]] = []
         self._about_cells: list[tuple[QLabel, QLabel]] = []
+        self._about_cols = 0
+        about.installEventFilter(self)
         ml.addWidget(about)
         self._show_about(self.settings.value("about_shown", "true") != "false")
 
@@ -365,16 +390,22 @@ class MainWindow(QMainWindow):
         scope.addStretch(1)
         scope.addWidget(self.reset_btn)
         ml.addLayout(scope)
-        split.addWidget(mid)
+        # the main view scrolls if the window is made too small to show all of it, so nothing is cut off
+        mid_scroll = QScrollArea()
+        mid_scroll.setWidgetResizable(True)
+        mid_scroll.setFrameShape(QFrame.NoFrame)
+        mid_scroll.setWidget(mid)
+        split.addWidget(mid_scroll)
         split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
         split.setSizes([420, 700])
-        left.setMinimumWidth(400)
+        left.setMinimumWidth(380)
         self.stack.addWidget(split)
 
     def _build_details(self):
         self.dock = QDockWidget("Details", self)
-        self.dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable)
+        self.dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable
+                              | QDockWidget.DockWidgetFloatable)
         self.dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea)
         self.tabs = QTabWidget()
         self.evidence = QTextBrowser()
@@ -418,10 +449,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(hexw, "Hex")
         self.tabs.addTab(self.logview, "Log")
         self.dock.setWidget(self.tabs)
-        self.dock.setMinimumWidth(590)
+        self.dock.setMinimumWidth(440)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
         self.dock.visibilityChanged.connect(self.details_act.setChecked)
-        self.dock.setVisible(self.settings.value("details_open", False, type=bool))
+        self.dock.hide()                                     # always starts hidden; the Details button opens it
 
     def _build_status(self):
         self.progress = QProgressBar()
@@ -449,13 +480,40 @@ class MainWindow(QMainWindow):
         self.profile_btn.setEnabled(loaded)
 
     def _toggle_details(self):
-        self.dock.setVisible(not self.dock.isVisible())
-        self.settings.setValue("details_open", self.dock.isVisible())
+        if self.dock.isVisible():
+            self.dock.hide()
+        else:
+            self._open_details()
 
     def _show_details(self, tab: int):
-        self.dock.setVisible(True)
         self.tabs.setCurrentIndex(tab)
-        self.settings.setValue("details_open", True)
+        self._open_details()
+
+    def _open_details(self) -> None:
+        """Show the Details panel without pushing anything off the screen.
+
+        Beside the main view when there is room for both; otherwise as its own window on top,
+        which can be moved, resized and closed.
+        """
+        room = self._screen_room()
+        beside = 400 + 620 + 600                             # list, main view, details
+        if self.isMaximized() or self.isFullScreen():
+            docked = self.width() >= beside
+        else:
+            docked = room is None or room.width() - 16 >= beside
+            if docked and self.width() < beside:             # widen the window, keeping it on the screen
+                self.resize(beside, self.height())
+                if room is not None and self.frameGeometry().right() > room.right():
+                    self.move(max(room.right() - self.frameGeometry().width(), room.x()), self.y())
+        self.dock.setFloating(not docked)
+        self.dock.show()
+        if not docked:
+            w = min(760, (room.width() - 40) if room else 760)
+            h = min(640, (room.height() - 80) if room else 640)
+            self.dock.resize(w, h)
+            if room is not None:
+                self.dock.move(room.right() - w - 20, room.y() + 60)
+            self.dock.raise_()
 
     def current(self) -> tuple[Track | None, ChipDump | None]:
         item = self.tree.currentItem()
@@ -755,32 +813,48 @@ class MainWindow(QMainWindow):
             rows = []
         self._about_rows = rows
         self.about_cap.setText("ABOUT THIS FILE" if chip is not None else "ABOUT THIS TRACK")
-        g = self.about_grid
         cells = self._about_cells
         # The labels are made once and reused: widgets deleted on every selection change would
         # still be waiting for deletion when the app closes, which can crash on exit.
         while len(cells) < len(rows):
             k = QLabel(self.about_body)
             k.setProperty("muted", True)
-            v = QLabel(self.about_body)
+            v = ElideLabel(self.about_body)
             v.setTextInteractionFlags(Qt.TextSelectableByMouse)
             cells.append((k, v))
-        per_col = max((len(rows) + 2) // 3, 1)             # three columns, filled top to bottom
-        room = max((self.about.width() or 960) // 3 - 130, 120)
         for i, (k, v) in enumerate(cells):
             used = i < len(rows)
             k.setVisible(used)
             v.setVisible(used)
-            if not used:
-                continue
-            label, value, tip = rows[i]
-            k.setText(label)
-            v.setText(v.fontMetrics().elidedText(value, Qt.ElideRight, room))
-            v.setToolTip(f"{label}: {value}" + ("\n\n" + tip if tip else ""))
-            k.setToolTip(tip)
+            if used:
+                label, value, tip = rows[i]
+                k.setText(label)
+                v.set_full_text(value)
+                v.setToolTip(f"{label}: {value}" + ("\n\n" + tip if tip else ""))
+                k.setToolTip(tip)
+        self._about_cols = 0
+        self._layout_about()
+
+    def _layout_about(self) -> None:
+        """Three columns of facts when there is room, two in a narrow window."""
+        n = len(self._about_rows)
+        cols = 3 if self.about.width() >= 760 else 2
+        if not n or cols == self._about_cols:
+            return
+        self._about_cols = cols
+        g = self.about_grid
+        per_col = max((n + cols - 1) // cols, 1)
+        for c in range(6):
+            g.setColumnStretch(c, 1 if c % 2 and c < cols * 2 else 0)
+        for i, (k, v) in enumerate(self._about_cells[:n]):
             col = (i // per_col) * 2
             g.addWidget(k, i % per_col, col)
             g.addWidget(v, i % per_col, col + 1)
+
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "about", None) and event.type() == QEvent.Resize:
+            self._layout_about()
+        return super().eventFilter(obj, event)
 
     def _show_about(self, on: bool) -> None:
         self.about_body.setVisible(on)

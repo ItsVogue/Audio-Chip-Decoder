@@ -14,6 +14,7 @@ from ..cleanup import Cleanup
 from ..export import FORMATS
 
 from .player import LivePlayer, Player, why_no_sound
+from .widgets import FitDialog
 
 CLIP_SECONDS = 8
 
@@ -63,7 +64,7 @@ def parse_length(text: str) -> float | None:
     return seconds if seconds > 0 else None
 
 
-class ListeningCheck(QDialog):
+class ListeningCheck(FitDialog):
     """Set the speed by ear: the sound keeps playing while a slider changes its speed."""
 
     def __init__(self, audio: np.ndarray, rates: list[int], current: int, player: Player, parent=None,
@@ -96,7 +97,7 @@ class ListeningCheck(QDialog):
         self._poll.setInterval(60)
         self._poll.timeout.connect(self._tick)
 
-        lay = QVBoxLayout(self)
+        lay = self.body()
         lay.setSpacing(10)
         intro = QLabel("Most chips do not store their playback speed, so it is set by listening. Press <b>Play</b>, "
                        "then drag the slider or click a speed until voices and instruments sound natural. "
@@ -411,14 +412,14 @@ class ListeningCheck(QDialog):
         super().done(result)
 
 
-class ExportDialog(QDialog):
+class ExportDialog(FitDialog):
     def __init__(self, default_dir: str, speed_confirmed: bool, summary: str, parent=None, settings=None,
                  sounds: int = 0):
         super().__init__(parent)
         self.setWindowTitle("Export audio files")
         self.setMinimumWidth(600)
         self._settings = settings
-        lay = QVBoxLayout(self)
+        lay = self.body()
         lay.setSpacing(10)
         head = QLabel(f"<b>Settings in force:</b> {summary}")
         head.setWordWrap(True)
