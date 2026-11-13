@@ -259,6 +259,28 @@ def test_export_dialog_options_reach_the_exporter(win, tmp_path):
     assert again.fmt.currentData() == "flac" and again.per_sound.isChecked() and again.cleanup().hum_hz == 60
 
 
+class FakeLive:
+    """Stands in for the gapless stream player."""
+
+    def __init__(self, available=True):
+        self.available, self.error, self.loop, self.playing = available, "no sound output", True, False
+        self.calls = []
+
+    def start(self, x, rate, pos=0):
+        self.calls.append(("start", rate, pos))
+        self.playing = True
+        return True
+
+    def set_rate(self, rate):
+        self.calls.append(("rate", rate))
+
+    def stop(self):
+        self.playing = False
+
+    def close(self):
+        self.calls.append(("close",))
+
+
 class FakePlayer:
     """Stands in for the sound card: remembers what was asked for and where playback is."""
     available = True
@@ -285,7 +307,8 @@ def test_speed_slider_reaches_any_speed_and_changes_it_live(win):
     from audiochip.gui.dialogs import ListeningCheck, rate_to_slider, slider_to_rate
     p = FakePlayer()
     d = ListeningCheck(win._audio, [22050, 32000, 44100], 32000, p, win, {22050: "voice pitch 120 Hz"},
-                       pitch_period=180.0, content_frames=48000, track_name="Dialog", many_tracks=True)
+                       pitch_period=180.0, content_frames=48000, track_name="Dialog", many_tracks=True,
+                       live=FakeLive(False))
     assert d.rate == 32000 and d._preset_btns[32000].isChecked() and "*" in d._preset_btns[22050].text()
     # the case that failed before: 24,000 Hz, offered neither by the estimate nor by its neighbours
     d.slider.setValue(rate_to_slider(24100))
@@ -377,28 +400,6 @@ def test_read_dialog_adapts_to_each_serial_reader(app, tmp_path, monkeypatch):
 
 
 # ------------------------------------------------------------------ 0.4.2 screens
-class FakeLive:
-    """Stands in for the gapless stream player."""
-
-    def __init__(self, available=True):
-        self.available, self.error, self.loop, self.playing = available, "no sound output", True, False
-        self.calls = []
-
-    def start(self, x, rate, pos=0):
-        self.calls.append(("start", rate, pos))
-        self.playing = True
-        return True
-
-    def set_rate(self, rate):
-        self.calls.append(("rate", rate))
-
-    def stop(self):
-        self.playing = False
-
-    def close(self):
-        self.calls.append(("close",))
-
-
 def test_gap_checkbox_switches_between_stream_and_restart(win):
     from audiochip.gui.dialogs import ListeningCheck
     p, live = FakePlayer(), FakeLive()
@@ -423,6 +424,8 @@ def test_gap_checkbox_switches_between_stream_and_restart(win):
     assert not again.smooth.isChecked()
     none = ListeningCheck(win._audio, [], 32000, FakePlayer(), win, live=FakeLive(False), settings=win.settings)
     assert not none.smooth.isEnabled() and "no sound output" in none.smooth.toolTip()
+    again.reject()
+    none.reject()
     win.settings.remove("speed_smooth")
 
 
@@ -452,7 +455,8 @@ def test_about_box_describes_a_chip_and_a_track(win):
     labels = {r[0]: r[1] for r in win._about_rows}
     assert win.about_cap.text() == "ABOUT THIS FILE" and labels["File"] == "1.bin"
     assert "chip 1 of 3" in labels["Role"] and labels["Fingerprint"].endswith("...") and "Sound data" in labels
-    assert win.about_grid.count() == 2 * len(win._about_rows)
+    shown = [k for k, _ in win._about_cells if not k.isHidden()]
+    assert len(shown) == len(win._about_rows) and shown[0].text() == "File"
     win._copy_about()
     from PySide6.QtWidgets import QApplication
     assert "Fingerprint:" in QApplication.clipboard().text()

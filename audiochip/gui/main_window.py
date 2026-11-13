@@ -289,6 +289,7 @@ class MainWindow(QMainWindow):
             self.about_grid.setColumnStretch(col, 1)
         al.addWidget(self.about_body)
         self._about_rows: list[tuple[str, str, str]] = []
+        self._about_cells: list[tuple[QLabel, QLabel]] = []
         ml.addWidget(about)
         self._show_about(self.settings.value("about_shown", "true") != "false")
 
@@ -755,22 +756,27 @@ class MainWindow(QMainWindow):
         self._about_rows = rows
         self.about_cap.setText("ABOUT THIS FILE" if chip is not None else "ABOUT THIS TRACK")
         g = self.about_grid
-        while g.count():
-            w = g.takeAt(0).widget()
-            if w is not None:
-                w.hide()
-                w.setParent(None)
-                w.deleteLater()
+        cells = self._about_cells
+        # The labels are made once and reused: widgets deleted on every selection change would
+        # still be waiting for deletion when the app closes, which can crash on exit.
+        while len(cells) < len(rows):
+            k = QLabel(self.about_body)
+            k.setProperty("muted", True)
+            v = QLabel(self.about_body)
+            v.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            cells.append((k, v))
         per_col = max((len(rows) + 2) // 3, 1)             # three columns, filled top to bottom
         room = max((self.about.width() or 960) // 3 - 130, 120)
-        for i, (label, value, tip) in enumerate(rows):
-            k = QLabel(label)
-            k.setProperty("muted", True)
-            v = QLabel()
-            v.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        for i, (k, v) in enumerate(cells):
+            used = i < len(rows)
+            k.setVisible(used)
+            v.setVisible(used)
+            if not used:
+                continue
+            label, value, tip = rows[i]
+            k.setText(label)
             v.setText(v.fontMetrics().elidedText(value, Qt.ElideRight, room))
-            full = f"{label}: {value}"
-            v.setToolTip(full + ("\n\n" + tip if tip else ""))
+            v.setToolTip(f"{label}: {value}" + ("\n\n" + tip if tip else ""))
             k.setToolTip(tip)
             col = (i // per_col) * 2
             g.addWidget(k, i % per_col, col)
