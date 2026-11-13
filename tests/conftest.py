@@ -94,11 +94,17 @@ def music():
 _status = {"code": None}
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_sessionfinish(session, exitstatus):
+    import gc
     _status["code"] = int(exitstatus)
+    # pytest collects garbage several times while it shuts down. Left-over Qt windows collected
+    # then are destroyed in no particular order, which is what crashed. Freezing leaves them be.
+    gc.disable()
+    gc.freeze()
 
 
-@pytest.hookimpl(trylast=True)
+@pytest.hookimpl(tryfirst=True)
 def pytest_unconfigure(config):
     import os
     import sys
