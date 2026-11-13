@@ -1,4 +1,4 @@
-audio chip decoder 0.3.0
+AUDIO CHIP DECODER 0.3.1
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports WAV files.
