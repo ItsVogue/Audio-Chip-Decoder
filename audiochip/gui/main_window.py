@@ -1391,6 +1391,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         self.player.close()
+        self.settings.sync()                      # the process stops right after the window closes
         if self._worker is not None:
             self._worker.wait(3000)
         super().closeEvent(e)

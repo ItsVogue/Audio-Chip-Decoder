@@ -86,3 +86,30 @@ def voice():
 @pytest.fixture(scope="session")
 def music():
     return make_music()
+
+
+# The app ends its process the moment its window closes (audiochip.gui.app.run), because Python
+# and Qt tearing down in different orders sometimes crashes on Windows after everything has
+# finished. The test run ends the same way, so a pass or fail is always reported as such.
+_status = {"code": None}
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _status["code"] = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    import os
+    import sys
+    if _status["code"] is None or "PySide6.QtWidgets" not in sys.modules:
+        return
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is not None:
+        for w in app.topLevelWidgets():
+            w.close()
+        app.processEvents()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_status["code"])

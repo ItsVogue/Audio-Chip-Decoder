@@ -151,5 +151,23 @@ def main(argv: list[str] | None = None) -> int:
     return app.exec()
 
 
+def run(argv: list[str] | None = None) -> None:
+    """Run the app as a program and end the process the moment it returns.
+
+    Python and Qt each tear their objects down at exit, in orders that do not always agree;
+    on Windows that occasionally ended the process with a crash code after the window had
+    already closed. Everything that needs saving is saved when the window closes, so the
+    process simply stops here instead.
+    """
+    import os
+    code = main(argv)
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(int(code or 0))
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    run()
