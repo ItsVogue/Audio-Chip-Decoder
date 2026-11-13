@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("--no-chips", action="store_true", help="write joined tracks only")
             sp.add_argument("--no-joined", action="store_true", help="write single-chip files only")
             sp.add_argument("--sounds", action="store_true", help="also write each separate sound as its own file")
-            sp.add_argument("--format", choices=("wav", "flac", "mp3"), default="wav", help="output file type")
+            sp.add_argument("--format", choices=("wav", "flac", "mp3", "ogg", "opus"), default="wav", help="output file type")
             sp.add_argument("--clean", default="", metavar="LIST",
                             help="clean-up steps, comma separated: offset, clicks, level, hum50, hum60")
     sub.add_parser("codecs", help="list the encodings this version knows")

@@ -25,7 +25,7 @@ AUDIO_LIKE_LEAK = 0.03            # below this the decode looks like filtered au
 _PENALTY_LAYOUT = {"normal": 1.0, "bitrev": 1.25, "nibswap": 1.25}
 _PENALTY_CHANNELS = {1: 1.0, 2: 1.25}
 _PENALTY_FAMILY = {"linear8": 1.0, "companded8": 1.0, "linear16": 1.25, "adpcm": 1.0, "delta": 1.0, "chip": 1.0}
-_SPECIAL = ("adpcm", "delta", "chip")     # tested by their own rules, not by the general sweep
+_SPECIAL = ("adpcm", "delta", "chip", "manual")     # tested by their own rules, not by the general sweep
 _NOT_THIS = 4 * (1 / 16)                  # score given to a special reading that does not fit
 LPC_SCAN_MAX = 1 << 18                    # dumps larger than this are not searched for LPC speech
 
@@ -339,12 +339,17 @@ def detect(data: bytes, st: Structure) -> Detection:
     cands += _evaluate_cvsd(window)
     found_audio = min(c.score for c in cands) < AUDIO_LIKE_LEAK       # includes a CVSD match
     cands += _evaluate_chips(data, st, found_audio)
+    from .morecodecs import extra_candidates
+    cands += extra_candidates(data, Candidate, Hypothesis, _NOT_THIS)
     cands.sort(key=lambda c: c.score)
     det.candidates = cands
     conf, reason = _judge(cands)
     if len(window) < MIN_ANALYSIS_BYTES and not cands[0].evidence:
         conf = "low" if conf != "none" else conf
         reason = det.reason + " " + reason
+    if conf == "none":                                   # unknown format: report framing if there is any
+        from .framing import describe
+        reason += describe(data)
     det.confidence, det.reason = conf, reason
     return det
 

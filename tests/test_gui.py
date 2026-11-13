@@ -553,3 +553,27 @@ def test_dialogs_shrink_to_a_small_screen_and_scroll(app, tmp_path, monkeypatch,
         if hasattr(d, "open_after"):
             d.open_after = []
         d.reject()
+
+
+def test_an_audio_file_opens_like_a_dump_and_states_its_speed(app, tmp_path, monkeypatch, voice, music):
+    import io
+    import numpy as np
+    sf = pytest.importorskip("soundfile")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    (tmp_path / "Song").mkdir()
+    buf = io.BytesIO()
+    sf.write(buf, np.stack([voice[:24000], music[:24000]], axis=1), 22050, format="WAV", subtype="MS_ADPCM")
+    (tmp_path / "Song" / "song.wav").write_bytes(buf.getvalue())
+    w = MainWindow()
+    w.show()
+    w.load_paths([str(tmp_path / "Song")])
+    _wait(w)
+    assert w.coll.hyp == Hypothesis("audiofile") and w.coll.rate == 22050
+    assert w.headline.text().startswith("Audio file") and "stated by the file" in w.speed_chip.text()
+    assert w._audio.shape[1] == 2 and "recognised" in w.enc_combo.itemText(0)
+    keys = [w.enc_combo.itemData(i) for i in range(w.enc_combo.count())]
+    assert "g721/normal/1" in keys and "s24le/normal/1" in keys and "gsm610/normal/1" in keys
+    w.enc_combo.setCurrentIndex(keys.index("g721/normal/1"))            # picking one by hand must not fail
+    w._encoding_chosen(keys.index("g721/normal/1"))
+    assert w.coll.hyp == Hypothesis("g721") and w._audio is not None
+    w.close()

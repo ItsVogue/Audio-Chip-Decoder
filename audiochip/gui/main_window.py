@@ -531,7 +531,9 @@ class MainWindow(QMainWindow):
         start = self.settings.value("last_dir", str(Path.home()))
         files, _ = QFileDialog.getOpenFileNames(
             self, "Open dump files", start,
-            "Chip dumps (*.bin *.rom *.hex *.ihx *.s19 *.s28 *.s37 *.srec *.mot *.eep *.dat *.dmp *.img);;All files (*)")
+            "Chip dumps (*.bin *.rom *.hex *.ihx *.s19 *.s28 *.s37 *.srec *.mot *.eep *.dat *.dmp *.img);;"
+            "Audio files (*.wav *.flac *.ogg *.opus *.mp3 *.aif *.aiff *.au *.caf *.voc *.vag *.vox *.gsm);;"
+            "All files (*)")
         if files:
             self.settings.setValue("last_dir", str(Path(files[0]).parent))
             self.load_paths(files)
@@ -774,7 +776,8 @@ class MainWindow(QMainWindow):
         if coll.rate_confirmed or track.rate_confirmed:
             self.speed_chip.set("Speed: confirmed", "ok")
         elif track.rate_stated and rate == track.rate_stated:
-            self.speed_chip.set("Speed: set by the chip format", "ok")
+            self.speed_chip.set("Speed: stated by the file" if hyp and hyp.codec == "audiofile"
+                                else "Speed: set by the chip format", "ok")
         else:
             self.speed_chip.set("Speed: estimated, not confirmed by ear", "warn")
         notes = list(track.warnings)

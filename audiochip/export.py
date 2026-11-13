@@ -39,7 +39,9 @@ def _safe(name: str) -> str:
 
 
 MP3_RATES = (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000)
-FORMATS = {"wav": "WAV, 16-bit (exact)", "flac": "FLAC (smaller, still exact)", "mp3": "MP3 (smallest, lossy)"}
+FORMATS = {"wav": "WAV, 16-bit (exact)", "flac": "FLAC (smaller, still exact)", "mp3": "MP3 (smallest, lossy)",
+           "ogg": "Ogg Vorbis (small, lossy)", "opus": "Opus (small, lossy)"}
+OPUS_RATES = (8000, 12000, 16000, 24000, 48000)
 
 
 class FormatUnavailable(RuntimeError):
@@ -60,13 +62,20 @@ def audio_bytes(x: np.ndarray, rate: int, fmt: str = "wav") -> tuple[bytes, int]
     if fmt == "flac":
         sf.write(buf, x, int(rate), format="FLAC", subtype="PCM_16")
         return buf.getvalue(), rate
-    if fmt == "mp3":
-        out_rate = next((r for r in MP3_RATES if r >= rate), MP3_RATES[-1])
+    if fmt == "ogg":
+        sf.write(buf, x, int(rate), format="OGG", subtype="VORBIS")
+        return buf.getvalue(), rate
+    if fmt in ("mp3", "opus"):
+        allowed = MP3_RATES if fmt == "mp3" else OPUS_RATES
+        out_rate = next((r for r in allowed if r >= rate), allowed[-1])
         if out_rate != rate:                                 # MP3 only allows a fixed set of speeds
             n = max(int(round(len(x) * out_rate / rate)), 1)
             pos = np.arange(n) * (rate / out_rate)
             x = np.stack([np.interp(pos, np.arange(len(x)), x[:, c]) for c in range(x.shape[1])], axis=1)
             x = np.clip(np.round(x), -32768, 32767).astype(np.int16)
+        if fmt == "opus":
+            sf.write(buf, x, out_rate, format="OGG", subtype="OPUS")
+            return buf.getvalue(), out_rate
         if "MP3" not in sf.available_formats():
             raise FormatUnavailable("This copy of the sound library cannot write MP3.")
         sf.write(buf, x, out_rate, format="MP3")
@@ -248,14 +257,16 @@ def report_text(coll: Collection, manifest: dict) -> str:
            "confirmed by ear" if coll.rate_confirmed else "ESTIMATED, NOT CONFIRMED BY EAR"))
     add(f"  Speed evidence: {coll.rate_estimate.reason}")
     o = manifest["options"]
-    kind = {"wav": "16-bit PCM WAV", "flac": "FLAC, 16-bit, lossless", "mp3": "MP3 (lossy)"}[o.get("format", "wav")]
+    kind = {"wav": "16-bit PCM WAV", "flac": "FLAC, 16-bit, lossless", "mp3": "MP3 (lossy)",
+            "ogg": "Ogg Vorbis (lossy)", "opus": "Opus (lossy)"}[o.get("format", "wav")]
     done = o.get("cleanup") or []
     add(f"  Output   : {kind}. "
         + ("Clean-up applied: " + "; ".join(done) + "." if done
            else "No filtering, volume change or pitch change.")
         + (" Padding at the end of each track removed." if o["trim_padding"] else " All padding kept."))
-    if o.get("format") == "mp3":
-        add("             MP3 allows only certain speeds; files at other speeds were resampled to the next one up.")
+    if o.get("format") in ("mp3", "opus"):
+        add("             MP3 and Opus allow only certain speeds; files at other speeds were resampled to the "
+            "next one up.")
     add("")
     add("TRACKS")
     for t in coll.tracks:

@@ -533,6 +533,9 @@ class ExportDialog(FitDialog):
             "flac": "FLAC holds exactly the same samples as WAV in about half the space.",
             "mp3": "MP3 is small but lossy: fine for listening, not for archiving. It only allows certain "
                    "speeds, so audio at any other speed is resampled to the next one up.",
+            "ogg": "Ogg Vorbis is small but lossy, and keeps the original speed whatever it is.",
+            "opus": "Opus is small but lossy. It only allows 8, 12, 16, 24 or 48 kHz, so audio at any other "
+                    "speed is resampled to the next one up.",
         }[self.fmt.currentData()])
 
     def cleanup(self) -> Cleanup:

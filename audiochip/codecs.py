@@ -25,6 +25,7 @@ class Codec:
     twin: str | None = None   # id of a decoder that sounds almost identical
     auto: bool = True         # included in automatic detection
     structured: bool = False  # the dump has its own layout (index, commands); see chipformats
+    own_channels: bool = False  # the format states its own channel count (audio files)
     layouts: tuple = ("normal", "bitrev", "nibswap")   # byte layouts worth offering
 
 
@@ -557,7 +558,8 @@ class Hypothesis:
         parts = [c.name]
         if self.layout != "normal":
             parts.append(LAYOUTS[self.layout][0])
-        parts.append("mono" if self.channels == 1 else f"{self.channels} channels")
+        if not c.own_channels:
+            parts.append("mono" if self.channels == 1 else f"{self.channels} channels")
         return ", ".join(parts)
 
     def is_twin_of(self, other: "Hypothesis") -> bool:
@@ -593,7 +595,8 @@ def decode(data: bytes | np.ndarray, hyp: Hypothesis) -> np.ndarray:
     b = _as_array(data)
     codec = CODECS[hyp.codec]
     if codec.structured:
-        return render(b, hyp).samples.reshape(-1, 1)
+        s = render(b, hyp).samples
+        return s if s.ndim == 2 else s.reshape(-1, 1)
 
     def run():
         x = codec.decode(LAYOUTS[hyp.layout][1](b))
@@ -619,3 +622,10 @@ def is_structured(hyp: Hypothesis | None) -> bool:
 def frames_for_bytes(nbytes: int, hyp: Hypothesis) -> int:
     """Samples produced by this many bytes. Only meaningful for plain sample streams."""
     return int(nbytes / CODECS[hyp.codec].bytes_per_sample) // hyp.channels
+
+
+# Additional codecs live in their own module and are added to the tables above without
+# replacing anything in them.
+from . import morecodecs as _more  # noqa: E402
+
+_more.register(CODECS, RENDERERS, Codec)

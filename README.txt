@@ -1,4 +1,4 @@
-AUDIO CHIP DECODER 0.4.4
+AUDIO CHIP DECODER 0.5.0
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports audio files.
@@ -150,6 +150,21 @@ Decodes:         8-bit unsigned, signed, sign-and-magnitude
                  The 8-bit ones also with reversed bit order or swapped
                  nibbles; any plain format as two interleaved channels.
                  WAV and MP3 files stored whole inside a dump or card.
+Also opens:      Ordinary audio files: WAV (PCM 8/16/24/32-bit, Microsoft
+                   ADPCM, IMA ADPCM, G.721, G.723, GSM 06.10, A-law,
+                   mu-law), FLAC, Ogg Vorbis, Opus, MP3, AIFF, AU, CAF
+                   (including ALAC), VOC. These carry their own speed.
+                 Sony PlayStation ADPCM: VAG files and raw SPU blocks.
+Pick by hand:    These are in the Encoding list but are never chosen
+                 automatically, because nothing in the bytes proves them:
+                 G.721 / G.726 at 32 kbit/s (either nibble order), G.723 at
+                   24 and 40 kbit/s, GSM 06.10 full rate
+                 Raw PCM 24-bit and 32-bit, signed or unsigned, either
+                   byte order (the top 16 bits are kept)
+Writes:          WAV, FLAC, MP3, Ogg Vorbis, Opus.
+Unknown formats: when nothing decodes, the app looks for fixed-size frames
+                 with a repeating marker and reports the frame size and
+                 marker bytes. It does not guess a decoder.
 
 NOT COVERED
 -----------
@@ -162,9 +177,15 @@ NOT COVERED
   2 KB, a quarter of a second of sound, and need a rewired socket. An XGecu
   programmer reads them.
 - 24-series I2C chips through an FT232H or serprog board.
-- Sound formats not listed above, for example Sega/Namco custom chips,
-  ADPCM kinds other than the four listed, and MPEG audio chips. These show
-  as "not recognised".
+- Not decoded yet, because each needs either FFmpeg (a large extra
+  program) or a decoder checked against a reference: AAC / HE-AAC, WMA,
+  AMR-NB / AMR-WB, Speex, QCELP, CRI ADX, Nintendo DSP ADPCM, EA ADPCM,
+  Bink Audio, SNES BRR, Creative ADPCM, Yamaha ADPCM-A.
+- Generalplus / Sunplus speech (GPDS, unSP, A1600, A1800 and relatives):
+  no published, verified decoder is built in. Frames of these formats are
+  detected and reported (size and marker bytes) but not decoded.
+- Other custom sound chips (Sega, Namco and similar). These show as "not
+  recognised".
 - LPC speech is found by searching for phrases. In a ROM that mixes speech
   with program code, a few short false phrases can appear in the list.
 

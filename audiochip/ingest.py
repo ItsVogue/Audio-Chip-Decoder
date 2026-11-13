@@ -8,7 +8,9 @@ from pathlib import Path
 RAW_EXT = {".bin", ".rom", ".dat", ".dmp", ".dump", ".img", ".eep", ".eeprom", ".raw", ".epr", ".u"}
 HEX_EXT = {".hex", ".ihx", ".ihex", ".h86", ".mcs"}
 SREC_EXT = {".s19", ".s28", ".s37", ".srec", ".mot", ".s", ".sx", ".s1", ".s2", ".s3"}
-DUMP_EXT = RAW_EXT | HEX_EXT | SREC_EXT
+AUDIO_EXT = {".wav", ".flac", ".ogg", ".oga", ".opus", ".mp3", ".aif", ".aiff", ".aifc", ".au", ".snd", ".caf",
+             ".voc", ".w64", ".vag", ".vox", ".gsm", ".g721", ".g723", ".g726", ".pcm"}     # read as raw bytes
+DUMP_EXT = RAW_EXT | HEX_EXT | SREC_EXT | AUDIO_EXT
 
 
 class DumpError(ValueError):

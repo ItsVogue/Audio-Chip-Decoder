@@ -299,11 +299,11 @@ def track_audio(coll: Collection, track: Track, trim: bool = False,
         return np.zeros((0, hyp.channels), dtype=np.int16)
     if is_structured(hyp):
         # each chip carries its own index, so each is decoded on its own and the results joined
-        gap = np.zeros((2000, 1), dtype=np.int16)
         parts = []
         for c in members:
             x = decode(c.dump.data, hyp)
-            if len(x):
+            if len(x) and (not parts or x.shape[1] == parts[0].shape[1]):
+                gap = np.zeros((2000, x.shape[1]), dtype=np.int16)
                 parts += ([gap] if parts else []) + [x]
         return np.concatenate(parts) if parts else np.zeros((0, 1), dtype=np.int16)
     data = track.joined_bytes()
