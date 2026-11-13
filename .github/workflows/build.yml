@@ -1,12 +1,12 @@
-# Tests the app on Windows, builds the one-file installer, and publishes it on a version tag.
-#   push to main        -> tests + installer kept as a build artifact for 30 days
-#   push a tag "v1.2.3" -> the same, and the installer is attached to a GitHub release
+# Tests the app on Windows, builds the one-file installer, and publishes it.
+#   Every push to main: tests, then the installer is built and kept as a build artifact for 30 days.
+#   If the version in audiochip/__init__.py has no release yet, a release "vX.Y.Z" is created
+#   with the installer attached. So: bump the version, push, and the download appears.
 name: Build Windows installer
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -33,12 +33,16 @@ jobs:
       - name: Read the version
         id: ver
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $v = python -c "import audiochip; print(audiochip.__version__)"
           "version=$v" >> $env:GITHUB_OUTPUT
-          if ($env:GITHUB_REF -like "refs/tags/v*" -and $env:GITHUB_REF_NAME -ne "v$v") {
-            Write-Error "Tag $env:GITHUB_REF_NAME does not match the app version $v"; exit 1
-          }
+          gh release view "v$v" --repo $env:GITHUB_REPOSITORY *> $null
+          $released = if ($LASTEXITCODE -eq 0) { "true" } else { "false" }
+          "released=$released" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $v, already released: $released"
+          exit 0
 
       - name: Run the tests on Windows
         run: python -m pytest -q tests
@@ -89,9 +93,11 @@ jobs:
           retention-days: 30
 
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref == 'refs/heads/main' && steps.ver.outputs.released == 'false'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.sha }}
           name: Audio Chip Decoder ${{ steps.ver.outputs.version }}
           files: dist/AudioChipDecoder-Setup-*.exe
           body: |
