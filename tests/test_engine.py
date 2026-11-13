@@ -14,7 +14,7 @@ from audiochip.rate import estimate, measure
 from audiochip.structure import analyse_structure
 from conftest import encode
 
-SIMPLE = [c.id for c in CODECS.values() if c.family != "adpcm"]
+SIMPLE = [c.id for c in CODECS.values() if c.family in ("linear8", "companded8", "linear16")]
 
 
 def _detect(data):
@@ -50,8 +50,8 @@ def test_detects_two_interleaved_channels(codec, voice, music):
     assert _same_or_twin(det.best.hyp, Hypothesis(codec, "normal", 2)), det.best.hyp.key
 
 
-@pytest.mark.parametrize("codec", ["oki_hi", "oki_lo"])
-def test_detects_oki_adpcm(codec, voice):
+@pytest.mark.parametrize("codec", ["oki_hi", "oki_lo", "ima_hi", "ima_lo", "yamaha_hi", "yamaha_lo"])
+def test_detects_each_adpcm_kind(codec, voice):
     det, _ = _detect(encode(voice, codec))
     assert det.best.hyp.codec == codec, [(c.hyp.key, c.leak, c.note) for c in det.candidates[:4]]
     assert det.confidence != "none"

@@ -1,0 +1,67 @@
+AUDIO CHIP DECODER - THIRD-PARTY SOFTWARE AND SOURCES
+=====================================================
+
+Bundled program
+---------------
+minipro (audiochip\readers\xgecu\minipro.exe, infoic.xml, logicic.xml)
+  Drives XGecu programmers. GNU GPL version 3 or later.
+  https://gitlab.com/DavidGriffith/minipro
+  Its licence is next to it; its source and build notes are in
+  tools\minipro-build. The app runs it as a separate program.
+
+Libraries installed with the app
+--------------------------------
+NumPy                 BSD 3-Clause           https://numpy.org
+PySide6 (Qt for Python)  LGPL version 3      https://www.qt.io/qt-for-python
+soundfile             BSD 3-Clause           https://github.com/bastibe/python-soundfile
+  with libsndfile     LGPL version 2.1       https://libsndfile.github.io/libsndfile/
+  (libsndfile includes FLAC, Ogg/Vorbis, Opus, mpg123 and LAME for MP3)
+pyserial              BSD 3-Clause           https://github.com/pyserial/pyserial
+PyUSB                 BSD 3-Clause           https://github.com/pyusb/pyusb
+libusb-package        Apache 2.0, with libusb under LGPL version 2.1
+                                             https://github.com/pyocd/libusb-package
+
+Sound-chip tables and behaviour
+-------------------------------
+The decoders for the NEC uPD7759, the OKI MSM6295 phrase table, CVSD delta
+modulation and TI LPC speech were written for this app. The constants stored
+inside those chips (the uPD7759 step table and the TI speech-chip energy,
+pitch, filter and chirp tables in audiochip\lpc_tables.py) and the description
+of how the chips behave come from the MAME project:
+  src/devices/sound/upd7759.cpp, tms5220.cpp, tms5110r.hxx, hc55516.cpp
+  https://github.com/mamedev/mame
+
+  Copyright (c) Juergen Buchmueller, Mike Balfour, Howie Cohen, Olivier
+  Galibert, Aaron Giles, Frank Palazzolo, Jonathan Gevaryahu, Raphael Nabet,
+  Couriersud, Michael Zapf
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are met:
+  1. Redistributions of source code must retain the above copyright notice,
+     this list of conditions and the following disclaimer.
+  2. Redistributions in binary form must reproduce the above copyright
+     notice, this list of conditions and the following disclaimer in the
+     documentation and/or other materials provided with the distribution.
+  3. Neither the name of the copyright holder nor the names of its
+     contributors may be used to endorse or promote products derived from
+     this software without specific prior written permission.
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  POSSIBILITY OF SUCH DAMAGE.
+
+Programmer protocols
+--------------------
+No code was copied for these; the commands each device understands were taken
+from the following published descriptions.
+CH341A, CH347     WCH's library headers CH341DLL_EN.H and CH347DLL_EN.H
+CH341A over USB   the command set documented in flashrom's ch341a_spi.c
+serprog           flashrom's serprog protocol specification
+FT232H            FTDI application note AN_108 (MPSSE command processor)

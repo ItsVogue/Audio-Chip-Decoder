@@ -32,7 +32,7 @@ def test_no_answer_and_unknown_ids():
     assert spi_flash_from_id(b"\xFF\xFF\xFF") is None and spi_flash_from_id(b"\x00\x00\x00") is None
     odd = spi_flash_from_id(b"\x5A\x12\xF0")
     assert odd.size == 0 and "by hand" in odd.note
-    assert spi_flash_from_id(b"\x1F\x26\x00").size == 0            # AT45 DataFlash: recognised, not readable
+    assert spi_flash_from_id(b"\x1F\x2F\x00").size == 0            # AT45 with an unknown density code
 
 
 def test_spi_flash_identify_and_read_back_exactly():
@@ -189,3 +189,162 @@ def test_bundled_windows_tool_is_present_and_64_bit():
     assert blob[pe:pe + 4] == b"PE\0\0" and blob[pe + 4:pe + 6] == b"\x64\x86"          # x86-64
     assert (xgecu.HERE / "infoic.xml").stat().st_size > 10_000_000
     assert (xgecu.HERE / "minipro-LICENSE.txt").exists()
+
+
+# ------------------------------------------------ AT45 and the other programmers
+from audiochip.readers.ch341a import open_reader as _open_reader          # noqa: E402
+from audiochip.readers.spi import SerialReader                            # noqa: E402
+
+
+def test_at45_dataflash_is_identified_and_read_page_by_page():
+    info = spi_flash_from_id(b"\x1F\x24\x00")                              # AT45DB041: 2048 pages of 264 bytes
+    assert info.family == "at45" and info.size == 2048 * 264
+    data = bytes(np.random.default_rng(5).integers(0, 256, info.size, dtype=np.uint8))
+    t = SimTransport(data, kind="at45", jedec=b"\x1F\x24\x00")
+    r = SerialReader(t)
+    assert r.identify().family == "at45"
+    assert r.read(info) == data
+    assert t.opcodes <= {0x9F, 0xD7, 0x03}
+
+
+class FakeCh341Usb:
+    """The CH341A as seen over raw USB: 32-byte command packets, data bits reversed."""
+
+    def __init__(self, chip):
+        self.chip, self.cs_low, self.tx, self.pending, self.log = chip, False, bytearray(), bytearray(), []
+
+    def write(self, ep, data, timeout=None):
+        data = bytes(data)
+        assert ep == 0x02 and len(data) <= 32
+        rev = bytes(int(f"{b:08b}"[::-1], 2) for b in range(256))
+        if data[0] == 0xAB:                                                # pin control
+            for b in data[1:]:
+                if b & 0xC0 == 0x80:
+                    low = not (b & 1)
+                    if self.cs_low and not low:
+                        self.tx.clear()
+                    if low and not self.cs_low:
+                        self.tx.clear()
+                        self.done = 0
+                    self.cs_low = low
+        elif data[0] == 0xA8:
+            assert self.cs_low, "SPI data sent with chip select high"
+            self.tx += data[1:].translate(rev)
+            full = self.chip.spi(bytes(self.tx))
+            self.pending += full[self.done:].translate(rev)
+            self.done = len(self.tx)
+        else:
+            assert data[0] == 0xAA
+        self.log.append(data[0])
+        return len(data)
+
+    def read(self, ep, size, timeout=None):
+        assert ep == 0x82
+        out, self.pending = bytes(self.pending[:size]), self.pending[size:]
+        return out
+
+
+def test_ch341a_over_generic_usb_driver_reads_the_same_bytes():
+    from audiochip.readers.ch341_usb import UsbTransport
+    data = bytes(np.random.default_rng(6).integers(0, 256, 65536, dtype=np.uint8))
+    chip = SimTransport(data, jedec=b"\xEF\x40\x10")
+    r = SerialReader(UsbTransport(FakeCh341Usb(chip)))
+    info = r.identify()
+    assert info.size == 65536
+    assert r.read(info) == data
+    assert chip.opcodes == {0x9F, 0x03}
+
+
+class FakeSerprog:
+    """A serial port with a serprog board on the other end."""
+
+    def __init__(self, chip, junk=b""):
+        self.chip, self.rx, self.buf = chip, bytearray(junk), bytearray()
+
+    def reset_input_buffer(self):
+        self.rx.clear()
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
+
+    def write(self, data):
+        self.buf += bytes(data)
+        while self.buf:
+            c = self.buf[0]
+            need = {0x12: 2, 0x14: 5, 0x15: 2}.get(c, 1)
+            if c == 0x13:
+                if len(self.buf) < 7:
+                    return
+                slen = int.from_bytes(self.buf[1:4], "little")
+                rlen = int.from_bytes(self.buf[4:7], "little")
+                if len(self.buf) < 7 + slen:
+                    return
+                tx = bytes(self.buf[7:7 + slen])
+                self.rx += b"\x06" + self.chip.spi(tx + b"\x00" * rlen)[slen:]
+                del self.buf[:7 + slen]
+                continue
+            if len(self.buf) < need:
+                return
+            if c == 0x00:
+                self.rx += b"\x06"
+            elif c == 0x10:
+                self.rx += b"\x15\x06"
+            elif c == 0x01:
+                self.rx += b"\x06\x01\x00"
+            elif c == 0x02:
+                cmap = bytearray(32)
+                for k in (0, 1, 2, 3, 0x10, 0x12, 0x13, 0x14, 0x15):
+                    cmap[k >> 3] |= 1 << (k & 7)
+                self.rx += b"\x06" + bytes(cmap)
+            elif c == 0x03:
+                self.rx += b"\x06" + b"pico-serprog".ljust(16, b"\x00")
+            elif c == 0x14:
+                self.rx += b"\x06" + bytes(self.buf[1:5])
+            else:
+                self.rx += b"\x06"
+            del self.buf[:need]
+
+    def read(self, n):
+        out, self.rx = bytes(self.rx[:n]), self.rx[n:]
+        return out
+
+
+def test_serprog_board_identifies_and_reads():
+    from audiochip.readers.serprog import SerprogTransport
+    data = bytes(np.random.default_rng(8).integers(0, 256, 1 << 17, dtype=np.uint8))
+    chip = SimTransport(data, jedec=b"\xC2\x20\x11")
+    t = SerprogTransport("COM9", ser=FakeSerprog(chip))
+    assert "pico-serprog" in t.describe() and "2.00 MHz" in t.describe()
+    r = SerialReader(t)
+    info = r.identify()
+    assert info.size == 1 << 17 and r.read(info) == data
+    assert chip.opcodes == {0x9F, 0x03}
+
+
+def test_ft232h_command_bytes_follow_the_mpsse_spec():
+    from audiochip.readers.ft232h import mpsse_setup, mpsse_transfer
+    assert mpsse_setup() == bytes([0x8A, 0x97, 0x8D, 0x85, 0x86, 14, 0, 0x80, 0x08, 0x0B])
+    b = mpsse_transfer(b"\x03\x00\x10\x00", 256)
+    assert b[:3] == bytes([0x80, 0x00, 0x0B])                              # chip select low
+    assert b[3:6] == bytes([0x11, 3, 0]) and b[6:10] == b"\x03\x00\x10\x00"   # 4 bytes out, falling edge
+    assert b[10:13] == bytes([0x20, 255, 0])                               # 256 bytes in, rising edge
+    assert b[13:] == bytes([0x80, 0x08, 0x0B, 0x87])                       # chip select high, flush
+
+
+def test_ch347_settings_block_matches_wch_header_layout():
+    import ctypes
+    from audiochip.readers.ch347 import SpiConfig
+    assert ctypes.sizeof(SpiConfig) == 20
+    assert SpiConfig.iChipSelect.offset == 6 and SpiConfig.iDelayDeactive.offset == 16
+
+
+def test_simulated_reader_of_each_kind_opens(tmp_path, monkeypatch):
+    f = tmp_path / "chip.bin"
+    f.write_bytes(bytes(range(256)) * 256)
+    monkeypatch.setenv("AUDIOCHIP_SIM", str(f))
+    for kind, i2c in (("ch341a", True), ("ch347", True), ("ft232h", False), ("serprog", False)):
+        with _open_reader(kind) as r:
+            assert r.has_i2c is i2c and r.identify().size == 65536

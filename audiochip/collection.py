@@ -12,10 +12,10 @@ from typing import Callable, Iterable
 
 import numpy as np
 
-from .codecs import CODECS, Hypothesis, decode
+from .codecs import CODECS, Hypothesis, decode, is_structured, render
 from .detect import Detection, combine, detect
 from .ingest import Dump, DumpError, is_dump_candidate, load_dump
-from .rate import RateEstimate, RateEvidence, estimate, measure
+from .rate import RateEstimate, RateEvidence, RateGuess, estimate, measure
 from .structure import Structure, analyse_structure
 
 Progress = Callable[[int, int, str], None]
@@ -50,6 +50,8 @@ class Track:
     order_basis: str = ""
     hyp_override: Hypothesis | None = None
     rate_override: int | None = None
+    override_auto: bool = False          # the override came from detection, not from the user
+    rate_stated: int = 0                 # playback speed carried by the chip format itself, if any
 
     @property
     def members(self) -> list[Chip]:
@@ -75,7 +77,7 @@ class Collection:
         return track.hyp_override or self.hyp
 
     def rate_for(self, track: Track) -> int:
-        return track.rate_override or self.rate
+        return track.rate_override or track.rate_stated or self.rate
 
     @property
     def chips(self) -> list[Chip]:
@@ -227,6 +229,7 @@ def _decide(coll: Collection) -> None:
         if (coll.hyp and tb and t.detection.confidence == "high" and tb.hyp != coll.hyp
                 and not tb.hyp.is_twin_of(coll.hyp)):
             t.hyp_override = tb.hyp
+            t.override_auto = True
             t.warnings.append(f"This track decodes best as {tb.hyp.label()}, unlike the rest of the collection. "
                               "It has been given its own setting.")
     measure_rates(coll)
@@ -236,9 +239,14 @@ def measure_rates(coll: Collection) -> None:
     """(Re)gather speed evidence under the readings now in force."""
     evidence = []
     for t in coll.tracks:
+        t.rate_stated = _stated_rate(t, coll.hyp_for(t))
+    # with the collection-wide reading in a format that states its speed, nothing needs estimating
+    stated = next((t.rate_stated for t in coll.tracks if t.rate_stated and not t.hyp_override), 0) \
+        if is_structured(coll.hyp) else 0
+    for t in coll.tracks:
         hyp = coll.hyp_for(t)
         for c in t.members:
-            if hyp is None or CODECS[hyp.codec].family == "adpcm" and c.dump.size > 1 << 18:
+            if stated or t.rate_stated or hyp is None or CODECS[hyp.codec].family in ("adpcm", "delta") and c.dump.size > 1 << 18:
                 c.rate_evidence = None
                 continue
             end = min(c.structure.content_end, c.structure.content_start + RATE_BYTES)
@@ -246,9 +254,29 @@ def measure_rates(coll: Collection) -> None:
             c.rate_evidence = measure(x.mean(axis=1)) if len(x) else None
             if c.rate_evidence:
                 evidence.append(c.rate_evidence)
+    if stated:
+        name = CODECS[coll.hyp.codec].name
+        coll.rate_estimate = RateEstimate(
+            [RateGuess(stated, 1.0)], informed=True, fixed=True,
+            reason=f"The {name} format sets its own speed: {stated:,} Hz. Nothing needs estimating. "
+                   "If the board ran the chip from a non-standard clock, the real speed scales with it.")
+        if not coll.rate_confirmed:
+            coll.rate = stated
+        return
     coll.rate_estimate = estimate(evidence)
     if not coll.rate_confirmed:
         coll.rate = coll.rate_estimate.best
+
+
+def _stated_rate(track: Track, hyp: Hypothesis | None) -> int:
+    """Playback speed carried by the format itself, or 0."""
+    if not is_structured(hyp):
+        return 0
+    for c in track.members:
+        r = render(c.dump.data, hyp)
+        if r.rate and len(r.samples):
+            return int(r.rate)
+    return 0
 
 
 # ------------------------------------------------------------------- decoding
@@ -268,11 +296,52 @@ def track_audio(coll: Collection, track: Track, trim: bool = False,
     members = track.members
     if not members:
         return np.zeros((0, hyp.channels), dtype=np.int16)
+    if is_structured(hyp):
+        # each chip carries its own index, so each is decoded on its own and the results joined
+        gap = np.zeros((2000, 1), dtype=np.int16)
+        parts = []
+        for c in members:
+            x = decode(c.dump.data, hyp)
+            if len(x):
+                parts += ([gap] if parts else []) + [x]
+        return np.concatenate(parts) if parts else np.zeros((0, 1), dtype=np.int16)
     data = track.joined_bytes()
     last = members[-1]
     if trim and last.structure.has_end_padding:
         data = data[: len(data) - last.structure.trail_len]
     return decode(data, hyp)
+
+
+def track_sounds(coll: Collection, track: Track, audio: np.ndarray | None = None, chip: Chip | None = None):
+    """The separate sounds in a track (or one chip of it): (sounds, how they were found).
+
+    Positions are in samples of track_audio (or chip_audio when a chip is given).
+    """
+    from .chipformats import Sound
+    from .sounds import sounds_of
+    hyp = coll.hyp_for(track)
+    rate = coll.rate_for(track)
+    if hyp is None:
+        return [], ""
+    if chip is not None:
+        return sounds_of(chip.dump.data, hyp, rate, None if is_structured(hyp) else audio)
+    if not is_structured(hyp):
+        if audio is None:
+            audio = track_audio(coll, track)
+        return sounds_of(b"", hyp, rate, audio)
+    out, pos, basis = [], 0, "the chip's own index"
+    many = len(track.members) > 1
+    for c in track.members:
+        r = render(c.dump.data, hyp)
+        if not len(r.samples):
+            continue
+        if pos:
+            pos += 2000
+        for s in r.sounds:
+            label = f"{Path(c.name).stem}: {s.label}" if many else s.label
+            out.append(Sound(pos + s.start, pos + s.end, label, s.offset))
+        pos += len(r.samples)
+    return out, basis
 
 
 def move_chip(track: Track, chip: Chip, delta: int) -> bool:

@@ -53,6 +53,8 @@ class WaveformView(QWidget):
         self._pad_from: int | None = None
         self._playhead: float | None = None
         self._env: tuple[int, np.ndarray, np.ndarray] | None = None
+        self._ticks: list[int] = []                    # starts of the separate sounds
+        self._region: tuple[int, int] | None = None    # the sound picked in the list
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Waveform of the selection. Click anywhere to play from that point.")
 
@@ -62,6 +64,16 @@ class WaveformView(QWidget):
         self._pad_from = pad_from
         self._env = None
         self._playhead = None
+        self._ticks = []
+        self._region = None
+        self.update()
+
+    def set_sounds(self, starts: list[int]) -> None:
+        self._ticks = list(starts)
+        self.update()
+
+    def set_region(self, region: tuple[int, int] | None) -> None:
+        self._region = region
         self.update()
 
     def set_playhead(self, frac: float | None) -> None:
@@ -101,6 +113,9 @@ class WaveformView(QWidget):
         if self._pad_from is not None and self._pad_from < n:
             x0 = int(w * self._pad_from / n)
             p.fillRect(QRectF(x0, 1, w - x0 - 1, h - 2), PAD)
+        if self._region:
+            a, b = (int(w * v / n) for v in self._region)
+            p.fillRect(QRectF(a, 1, max(b - a, 2), h - 2), QColor(76, 141, 255, 46))
         lo, hi = self._envelope(max(w, 2))
         scale = (h / 2 - 6) / 32768.0
         p.setPen(QPen(WAVE, 1))
@@ -121,6 +136,11 @@ class WaveformView(QWidget):
                 p.setPen(MUTED)
                 p.drawText(x + 3, 12, label)
                 last_label_x = x
+        if self._ticks and len(self._ticks) <= w // 3:
+            p.setPen(QPen(QColor("#5BD6A2"), 1))
+            for frame in self._ticks:
+                x = int(w * frame / n)
+                p.drawLine(x, h - 8, x, h - 2)
         if self._pad_from is not None and self._pad_from < n and w - int(w * self._pad_from / n) > 60:
             p.setPen(QColor("#F2BE63"))
             p.drawText(int(w * self._pad_from / n) + 4, h - 6, "padding")

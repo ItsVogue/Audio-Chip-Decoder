@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from audiochip.codecs import CODECS, LAYOUTS, oki_encode
+from audiochip.codecs import CODECS, LAYOUTS, cvsd_encode, ima_encode, oki_encode, yamaha_encode
 
 
 def lowpass(x, frac):
@@ -65,10 +65,14 @@ def encode(x, codec_id, layout="normal", channels=1):
         dt = {"s16le": "<i2", "s16be": ">i2", "u16le": "<u2", "u16be": ">u2"}[codec_id]
         v = flat.astype(np.int32) + (32768 if codec_id.startswith("u") else 0)
         b = np.frombuffer(v.astype(dt).tobytes(), dtype=np.uint8)
+    elif fam == "delta":
+        bits = cvsd_encode(flat)
+        b = np.packbits(np.array(bits[: len(bits) // 8 * 8], dtype=np.uint8))
     else:
-        codes = oki_encode(flat)
+        kind, order = codec_id.split("_")
+        codes = {"oki": oki_encode, "ima": ima_encode, "yamaha": yamaha_encode}[kind](flat)
         codes = codes[: len(codes) // 2 * 2]
-        hi, lo = (codes[0::2], codes[1::2]) if codec_id == "oki_hi" else (codes[1::2], codes[0::2])
+        hi, lo = (codes[0::2], codes[1::2]) if order == "hi" else (codes[1::2], codes[0::2])
         b = (np.array(hi, dtype=np.uint8) << 4) | np.array(lo, dtype=np.uint8)
     b = LAYOUTS[layout][1](np.ascontiguousarray(b))     # both extra layouts are their own inverse
     return bytes(b)

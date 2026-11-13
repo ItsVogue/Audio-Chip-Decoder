@@ -13,15 +13,22 @@ _SST25 = {0x8C: 1 << 18, 0x8D: 1 << 19, 0x8E: 1 << 20,
           0x41: 1 << 21, 0x4A: 1 << 22, 0x4B: 1 << 23}
 
 
+# AT45DB DataFlash by the density code in its ID: (pages, bytes per page as shipped)
+AT45_GEOMETRY = {0x02: (512, 264), 0x03: (1024, 264), 0x04: (2048, 264), 0x05: (4096, 264),
+                 0x06: (4096, 528), 0x07: (8192, 528), 0x08: (8192, 1056)}
+
+
 @dataclass
 class ChipInfo:
-    family: str            # "spi_flash" | "spi_eeprom" | "i2c_eeprom"
+    family: str            # "spi_flash" | "spi_eeprom" | "i2c_eeprom" | "at45"
     name: str
     size: int              # bytes; 0 when it could not be worked out
     addr_bytes: int = 3    # SPI only
     i2c_type: int = -1     # index into WCH's EEPROM type list, I2C only
     id_bytes: bytes = b""
     note: str = ""
+    pages: int = 0         # AT45 DataFlash only
+    page_size: int = 0     # AT45 DataFlash only: 264, 528 or 1056 unless the chip was set to binary pages
 
     def describe(self) -> str:
         size = human_size(self.size) if self.size else "size unknown"
@@ -51,8 +58,10 @@ def spi_flash_from_id(jedec: bytes) -> ChipInfo | None:
     elif mfr == 0x1F:
         family, density = kind >> 5, kind & 0x1F
         if family == 1:
-            return ChipInfo("spi_flash", f"{maker} AT45 DataFlash", 0, id_bytes=bytes(jedec[:3]),
-                            note="AT45 DataFlash uses its own read commands, which this version does not have.")
+            pages, psize = AT45_GEOMETRY.get(density, (0, 0))
+            return ChipInfo("at45", f"{maker} AT45DB DataFlash", pages * psize, id_bytes=bytes(jedec[:3]),
+                            pages=pages, page_size=psize,
+                            note="" if pages else "This AT45 density code is not one this version knows.")
         if 1 <= density <= 12:
             size = 1 << (density + 15)
     elif 0x08 <= cap <= 0x1F:

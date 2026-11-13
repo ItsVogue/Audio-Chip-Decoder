@@ -17,13 +17,13 @@ import os
 import sys
 from pathlib import Path
 
-from .base import Cancelled, CancelCheck, DriverMissing, NoDevice, Progress, ReaderError
-from .chips import ChipInfo, spi_flash_from_id
+from .base import DriverMissing, NoDevice, Progress, ReaderError
+from .spi import FullDuplex, SerialReader
+
+Ch341a = SerialReader          # the name older code and tests use
 
 DRIVER_ZIP_URL = "https://www.wch-ic.com/download/file?id=7"          # WCH's CH341PAR.ZIP
 DRIVER_PAGE_URL = "https://www.wch-ic.com/downloads/CH341PAR_ZIP.html"
-SPI_CHUNK = 2048            # data bytes per SPI transfer; WCH's limit is 4096 including the command
-I2C_CHUNK = 256
 STREAM_MODE = 0x81          # bit 7: SPI bytes most-significant-bit first; bits 1-0 = 01: I2C at 100 kHz
 CS_D0 = 0x80                # use pin D0 as chip select, driven low for the transfer
 
@@ -33,8 +33,12 @@ def driver_cache_dir() -> Path:
     return base / "AudioChipDecoder" / "driver"
 
 
-class DllTransport:
+class DllTransport(FullDuplex):
     """Thin wrapper over WCH's CH341 library."""
+
+    name = "CH341A programmer"
+    has_i2c = True
+    max_chunk = 2048
 
     def __init__(self, index: int = 0):
         if sys.platform != "win32":
@@ -104,21 +108,26 @@ class DllTransport:
             self.open = False
 
 
-class SimTransport:
+class SimTransport(FullDuplex):
     """A pretend programmer with a pretend chip, for tests and for trying the screens.
 
     kind: "spi_flash" (answers the ID command), "spi_eeprom", "i2c", or "empty" (nothing fitted).
     flaky: every Nth read returns one wrong byte, to exercise read verification.
     """
 
+    name = "simulated programmer"
+    has_i2c = True
+    max_chunk = 2048
+
     def __init__(self, data: bytes = b"", kind: str = "spi_flash", jedec: bytes = b"\xEF\x40\x12",
                  addr_bytes: int = 3, flaky: int = 0):
         self.data, self.kind, self.jedec, self.addr_bytes, self.flaky = data, kind, jedec, addr_bytes, flaky
         self.calls = 0
         self.opcodes: set[int] = set()
+        self.page_size = 264
 
     def describe(self) -> str:
-        return "simulated CH341A"
+        return self.name
 
     def _mem(self, addr: int, n: int) -> bytes:
         size = len(self.data)
@@ -138,8 +147,15 @@ class SimTransport:
         if self.kind in ("empty", "i2c"):
             return b"\xFF" * len(tx)
         if op == 0x9F:
-            ident = self.jedec if self.kind == "spi_flash" else b"\xFF\xFF\xFF"
+            ident = self.jedec if self.kind in ("spi_flash", "at45") else b"\xFF\xFF\xFF"
             return (b"\xFF" + ident + b"\xFF" * len(tx))[: len(tx)]
+        if op == 0xD7:                                        # AT45 status: bit 0 clear = DataFlash page size
+            return b"\xFF" + bytes([0xBC if self.kind == "at45" else 0xFF]) * (len(tx) - 1)
+        if self.kind == "at45" and op == 0x03:
+            raw = int.from_bytes(tx[1:4], "big")
+            shift = {264: 9, 528: 10, 1056: 11}[self.page_size]
+            addr = (raw >> shift) * self.page_size + (raw & ((1 << shift) - 1))
+            return b"\xFF" * 4 + self._mem(addr, len(tx) - 4)
         if op in (0x03, 0x0B, 0x13):
             ab = 4 if op == 0x13 else self.addr_bytes
             addr = int.from_bytes(tx[1:1 + ab], "big")
@@ -157,86 +173,48 @@ class SimTransport:
         pass
 
 
-class Ch341a:
-    def __init__(self, transport=None):
-        self.t = transport if transport is not None else DllTransport()
-
-    def describe(self) -> str:
-        return self.t.describe()
-
-    def close(self) -> None:
-        self.t.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
-
-    # ------------------------------------------------------------ identify
-    def jedec_id(self) -> bytes:
-        first = self.t.spi(b"\x9F\x00\x00\x00")[1:4]
-        second = self.t.spi(b"\x9F\x00\x00\x00")[1:4]
-        if first != second:
-            raise ReaderError("The chip gave two different answers to the same ID request "
-                              f"({first.hex(' ').upper()} then {second.hex(' ').upper()}). The contact is poor: "
-                              "reseat the chip or clip and try again.")
-        return first
-
-    def identify(self) -> ChipInfo | None:
-        """Ask a 25-series flash chip who it is. None when nothing answers."""
-        return spi_flash_from_id(self.jedec_id())
-
-    # ---------------------------------------------------------------- read
-    def read(self, chip: ChipInfo, progress: Progress | None = None, cancel: CancelCheck | None = None) -> bytes:
-        if not chip.size:
-            raise ReaderError("The chip size is not known. Pick the size before reading.")
-        if chip.family == "i2c_eeprom":
-            return self._read_i2c(chip, progress, cancel)
-        return self._read_spi(chip, progress, cancel)
-
-    def _read_spi(self, chip: ChipInfo, progress, cancel) -> bytes:
-        out = bytearray()
-        size, ab = chip.size, chip.addr_bytes
-        while len(out) < size:
-            if cancel and cancel():
-                raise Cancelled("Reading was cancelled.")
-            addr = len(out)
-            n = min(SPI_CHUNK, size - addr)
-            if ab == 1 and size > 256:
-                n = min(n, 256 - (addr & 0xFF))                 # address bit 8 rides in the opcode
-                cmd = bytes([0x03 | (0x08 if addr & 0x100 else 0), addr & 0xFF])
-            elif ab == 4:
-                cmd = b"\x13" + addr.to_bytes(4, "big")
-            else:
-                cmd = b"\x03" + addr.to_bytes(ab, "big")
-            rx = self.t.spi(cmd + b"\x00" * n)
-            out += rx[len(cmd):len(cmd) + n]
-            if progress:
-                progress(len(out), size, "")
-        return bytes(out)
-
-    def _read_i2c(self, chip: ChipInfo, progress, cancel) -> bytes:
-        out = bytearray()
-        while len(out) < chip.size:
-            if cancel and cancel():
-                raise Cancelled("Reading was cancelled.")
-            n = min(I2C_CHUNK, chip.size - len(out))
-            out += self.t.read_eeprom(chip.i2c_type, len(out), n)
-            if progress:
-                progress(len(out), chip.size, "")
-        return bytes(out)
+SERIAL_READERS = {
+    "ch341a": "CH341A programmer",
+    "ch347": "CH347 adapter",
+    "ft232h": "FT232H board",
+    "serprog": "Pico / Arduino reader (serprog)",
+}
+SPI_ONLY = ("ft232h", "serprog")
 
 
-def open_reader() -> Ch341a:
-    """Open the programmer. With AUDIOCHIP_SIM set to a file, use a simulated chip holding that file."""
+def open_reader(kind: str = "ch341a", port: str | None = None) -> SerialReader:
+    """Open a serial-chip programmer.
+
+    With AUDIOCHIP_SIM set to a file, a simulated chip holding that file is used instead.
+    For a CH341A, WCH's driver is tried first; if it is missing or finds nothing, the generic
+    USB driver (WinUSB/libusb, as installed by Zadig) is tried before giving up.
+    """
     sim = os.environ.get("AUDIOCHIP_SIM")
     if sim:
         data = Path(sim).read_bytes() if Path(sim).is_file() else b""
-        kind = os.environ.get("AUDIOCHIP_SIM_KIND", "spi_flash") if data else "empty"
+        chip_kind = os.environ.get("AUDIOCHIP_SIM_KIND", "spi_flash") if data else "empty"
         cap = max(len(data) - 1, 1).bit_length()
-        return Ch341a(SimTransport(data, kind, bytes([0xEF, 0x40, cap])))
-    return Ch341a(DllTransport())
+        t = SimTransport(data, chip_kind, bytes([0xEF, 0x40, cap]))
+        t.name = "simulated " + SERIAL_READERS.get(kind, kind)
+        t.has_i2c = kind not in SPI_ONLY
+        return SerialReader(t)
+    if kind == "ch347":
+        from .ch347 import Ch347Transport
+        return SerialReader(Ch347Transport())
+    if kind == "ft232h":
+        from .ft232h import FtdiTransport
+        return SerialReader(FtdiTransport())
+    if kind == "serprog":
+        from .serprog import SerprogTransport
+        return SerialReader(SerprogTransport(port or ""))
+    try:
+        return SerialReader(DllTransport())
+    except (DriverMissing, NoDevice) as first:
+        from .ch341_usb import UsbTransport
+        try:
+            return SerialReader(UsbTransport())
+        except (DriverMissing, NoDevice):
+            raise first from None
 
 
 def install_driver(progress: Progress | None = None) -> Path:

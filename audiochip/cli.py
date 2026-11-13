@@ -8,6 +8,7 @@ from pathlib import Path
 from . import APP_NAME, __version__
 from .codecs import CODECS, LAYOUTS, Hypothesis
 from .collection import Collection, build, measure_rates
+from .cleanup import Cleanup
 from .export import ExportOptions, describe_reading, export
 from . import profiles
 
@@ -84,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
             sp.add_argument("--keep-padding", action="store_true", help="do not remove padding at the end of tracks")
             sp.add_argument("--no-chips", action="store_true", help="write joined tracks only")
             sp.add_argument("--no-joined", action="store_true", help="write single-chip files only")
+            sp.add_argument("--sounds", action="store_true", help="also write each separate sound as its own file")
+            sp.add_argument("--format", choices=("wav", "flac", "mp3"), default="wav", help="output file type")
+            sp.add_argument("--clean", default="", metavar="LIST",
+                            help="clean-up steps, comma separated: offset, clicks, level, hum50, hum60")
     sub.add_parser("codecs", help="list the encodings this version knows")
     sub.add_parser("profiles", help="list saved device profiles")
     args = ap.parse_args(argv)
@@ -107,8 +112,15 @@ def main(argv: list[str] | None = None) -> int:
         if coll.hyp is None:
             print("\nNothing written: no encoding was recognised. Use --codec to force one.", file=sys.stderr)
             return 3
+        steps = {t.strip() for t in args.clean.split(",") if t.strip()}
+        bad = steps - {"offset", "clicks", "level", "hum50", "hum60"}
+        if bad:
+            print("Unknown clean-up step: " + ", ".join(sorted(bad)), file=sys.stderr)
+            return 2
+        cleanup = Cleanup(remove_offset="offset" in steps, declick="clicks" in steps, level="level" in steps,
+                          hum_hz=50 if "hum50" in steps else 60 if "hum60" in steps else 0)
         opts = ExportOptions(per_chip=not args.no_chips, joined=not args.no_joined,
-                             trim_padding=not args.keep_padding)
+                             trim_padding=not args.keep_padding, per_sound=args.sounds, fmt=args.format, cleanup=cleanup)
         manifest = export(coll, args.out, opts, _progress)
         print(f"\nWrote {len(manifest['files'])} files to {Path(args.out).resolve()}")
     return 0

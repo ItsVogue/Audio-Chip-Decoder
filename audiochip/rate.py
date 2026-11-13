@@ -76,6 +76,7 @@ class RateEstimate:
     shortlist: list[RateGuess] = field(default_factory=list)   # best first, every standard rate
     informed: bool = False                                      # False: nothing in the audio narrowed it
     reason: str = ""
+    fixed: bool = False                                         # True: the chip format itself states the speed
 
     @property
     def best(self) -> int:

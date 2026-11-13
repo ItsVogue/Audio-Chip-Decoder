@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFram
 
 from ..readers import Cancelled, DriverMissing, NoDevice, ReaderError, cards, xgecu
 from ..readers.base import read_verified
-from ..readers.ch341a import install_driver, open_reader
+from ..readers.ch341a import SPI_ONLY, install_driver, open_reader
+from ..readers.serprog import list_ports
 from ..readers.chips import (I2C_TYPES, SPI_EEPROM_TYPES, SPI_FLASH_SIZES, ChipInfo, human_size, i2c_chip,
                              spi_eeprom_chip, spi_flash_chip)
 from ..structure import analyse_structure
@@ -23,14 +24,42 @@ from .worker import Worker
 
 FAMILY_HINT = {
     "spi_flash": "25-series flash chips identify themselves, so Detect chip finds the size. Typical markings: "
-                 "W25Q32, MX25L1606, SST25VF040, M25P80, GD25Q16.",
+                 "W25Q32, MX25L1606, SST25VF040, M25P80, GD25Q16. AT45DB DataFlash is detected too; its pin "
+                 "order differs from 25-series, so wire it by its datasheet rather than using the 25-series socket.",
     "spi_eeprom": "Small SPI EEPROMs carry no ID. Pick the type printed on the chip: the digits after 25 or 95 "
                   "give the size in kilobits. Examples: 25LC256, AT25640, M95160, 25AA1024.",
     "i2c_eeprom": "I2C EEPROMs carry no ID. Pick the type printed on the chip: the digits after 24 give the size "
                   "in kilobits. Examples: 24C02, AT24C64, 24LC256, M24512.",
 }
-VOLTAGE_NOTE = ("Voltage: most CH341A boards drive their data lines at 5 V. That suits 5 V chips, which most old "
-                "ones are. For a 3.3 V or 1.8 V chip, use the board's 3.3 V setting or a level adapter first.")
+VOLTAGE_NOTE = {
+    "ch341a": ("Voltage: most CH341A boards drive their data lines at 5 V. That suits 5 V chips, which most old "
+               "ones are. For a 3.3 V or 1.8 V chip, use the board's 3.3 V setting or a level adapter first."),
+    "ch347": ("Voltage: CH347 boards work at 3.3 V. That suits 3.3 V chips. A 5 V-only chip may not answer at "
+              "3.3 V, and a 1.8 V chip needs a level adapter."),
+    "ft232h": ("Voltage: the FT232H's pins are 3.3 V. Power a 3.3 V chip from the board's 3V3 pin. A 1.8 V chip "
+               "needs a level adapter; never feed a 3.3 V chip from 5 V."),
+    "serprog": ("Voltage: a Pico works at 3.3 V, most Arduinos at 5 V. Match the board to the chip, or use a "
+                "level adapter."),
+}
+
+
+SERIAL = ("ch341a", "ch347", "ft232h", "serprog")
+DETECT_PROMPT = {
+    "ch341a": "Seat the chip in the socket or clip it, then press Detect chip.",
+    "ch347": "Seat the chip in the socket or clip it, then press Detect chip.",
+    "ft232h": "Wire the chip to the board as shown below, then press Detect chip.",
+    "serprog": "Wire the chip to the board as its firmware's instructions show, then press Detect chip.",
+}
+WIRING = {
+    "ch341a": "",
+    "ch347": "",
+    "ft232h": ("<b>Wiring (port A):</b> AD0 to the chip's clock (pin 6 on 25-series), AD1 to its data in (pin 5), "
+               "AD2 to its data out (pin 2), AD3 to chip select (pin 1). GND to pin 4, 3.3 V to pin 8, and tie "
+               "the WP and HOLD pins (3 and 7) to 3.3 V."),
+    "serprog": ("<b>Firmware:</b> the board must be running serprog firmware (pico-serprog on a Pico, "
+                "frser-duino on an Arduino). The pin assignment is fixed by that firmware. Use 3.3 V for the chip; "
+                "a 5 V Arduino needs level shifting."),
+}
 
 
 def _safe(name: str) -> str:
@@ -60,9 +89,12 @@ class ReadDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(QLabel("<b>Read with</b>"))
         self.source = QComboBox()
-        self.source.addItem("CH341A programmer  -  8-pin serial chips (24, 25, 95 series)", "ch341a")
+        self.source.addItem("CH341A programmer  -  8-pin serial chips (24, 25, 95 series, AT45)", "ch341a")
         self.source.addItem("XGecu T48 / TL866II Plus / TL866A/CS  -  parallel EPROM and flash, and serial chips",
                             "xgecu")
+        self.source.addItem("CH347 adapter  -  8-pin serial chips (24, 25, 95 series, AT45)", "ch347")
+        self.source.addItem("FT232H / FT2232H board  -  SPI chips (25, 95 series, AT45), wired by hand", "ft232h")
+        self.source.addItem("Raspberry Pi Pico or Arduino with serprog firmware  -  SPI chips", "serprog")
         self.source.addItem("USB card reader  -  memory cards and USB drives", "card")
         self.source.setCurrentIndex(max(self.source.findData(settings.value("reader", "ch341a")), 0))
         self.source.currentIndexChanged.connect(self._source_changed)
@@ -90,8 +122,16 @@ class ReadDialog(QDialog):
         self.driver_btn.setToolTip("Downloads WCH's CH341 driver from wch-ic.com and starts its installer. "
                                    "Windows asks for permission; then press INSTALL in WCH's window.")
         self.driver_btn.clicked.connect(self._install_driver)
+        self.port_label = QLabel("Port")
+        self.port = QComboBox()
+        self.port.setMinimumWidth(260)
+        self.port.setToolTip("The COM port the board appears as. Unplug and replug it and press Check again "
+                             "if you are not sure which one it is: the new entry is the board.")
+        self.port.activated.connect(lambda *_: self._check_reader())
         r = QHBoxLayout()
         r.setSpacing(8)
+        r.addWidget(self.port_label)
+        r.addWidget(self.port)
         r.addWidget(self.reader_chip)
         r.addWidget(self.recheck_btn)
         r.addWidget(self.driver_btn)
@@ -130,10 +170,15 @@ class ReadDialog(QDialog):
         self.hint = QLabel()
         self.hint.setWordWrap(True)
         self.hint.setProperty("muted", True)
-        self.hint.setMinimumHeight(38)
+        self.hint.setMinimumHeight(54)
         self.hint.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         g.addWidget(self.hint, 4, 1)
-        volt = QLabel(VOLTAGE_NOTE)
+        self.wiring = QLabel()
+        self.wiring.setWordWrap(True)
+        self.wiring.setProperty("muted", True)
+        self.wiring.setTextFormat(Qt.RichText)
+        g.addWidget(self.wiring, 6, 1)
+        volt = self.volt = QLabel(VOLTAGE_NOTE["ch341a"])
         volt.setWordWrap(True)
         volt.setProperty("warning", True)
         volt.setMinimumHeight(58)
@@ -345,7 +390,26 @@ class ReadDialog(QDialog):
     def _source_changed(self) -> None:
         src = self._src()
         self.settings.setValue("reader", src)
-        self.pages.setCurrentIndex({"ch341a": 0, "xgecu": 1, "card": 2}[src])
+        self.pages.setCurrentIndex({"xgecu": 1, "card": 2}.get(src, 0))
+        serial = src in SERIAL
+        self.port_label.setVisible(src == "serprog")
+        self.port.setVisible(src == "serprog")
+        if serial:
+            self._detected = None
+            keep = self.family.currentData()
+            self.family.blockSignals(True)
+            self.family.clear()
+            self.family.addItem("25-series SPI flash", "spi_flash")
+            if src not in SPI_ONLY:
+                self.family.addItem("24-series I2C EEPROM", "i2c_eeprom")
+            self.family.addItem("25/95-series SPI EEPROM", "spi_eeprom")
+            self.family.setCurrentIndex(max(self.family.findData(keep), 0))
+            self.family.blockSignals(False)
+            self._family_changed()
+            self.detect_text.setText(DETECT_PROMPT[src])
+            self.volt.setText(VOLTAGE_NOTE[src])
+            self.wiring.setText(WIRING[src])
+            self.wiring.setVisible(bool(WIRING[src]))
         self.read_btn.setText("Read card" if src == "card" else "Read chip")
         self.verify.setEnabled(src != "card")
         self.number.setEnabled(src != "card")
@@ -419,20 +483,25 @@ class ReadDialog(QDialog):
         if self._src() == "xgecu":
             self._check_xgecu()
             return
-        if self._src() != "ch341a":
+        if self._src() not in SERIAL:
             return
+        src = self._src()
+        wch = src in ("ch341a", "ch347")
+        if src == "serprog":
+            self._fill_ports()
         try:
-            with open_reader() as r:
+            with self._open() as r:
                 desc = r.describe()
         except DriverMissing as e:
             self.reader_chip.set("Driver not installed", "low")
-            self.reader_text.setText(f"{e} Press Install the driver; it takes about a minute and is needed once.")
-            self.driver_btn.show()
+            self.reader_text.setText(f"{e} Press Install the driver; it takes about a minute and is needed once."
+                                     if wch else str(e))
+            self.driver_btn.setVisible(wch)
             self._reader_ok = False
         except NoDevice as e:
             self.reader_chip.set("Programmer not found", "low")
             self.reader_text.setText(str(e))
-            self.driver_btn.show()
+            self.driver_btn.setVisible(wch)
             self._reader_ok = False
         except ReaderError as e:
             self.reader_chip.set("Problem", "low")
@@ -485,6 +554,22 @@ class ReadDialog(QDialog):
             self.x_count.setText("No chip in the programmer's list matches. Try fewer characters, such as the "
                                  "digits only.")
 
+    def _open(self):
+        return open_reader(self._src(), self.port.currentData())
+
+    def _fill_ports(self) -> None:
+        keep = self.port.currentData() or self.settings.value("serprog_port", "")
+        self.port.blockSignals(True)
+        self.port.clear()
+        for dev, desc in list_ports():
+            self.port.addItem(desc if dev in desc else f"{dev}  -  {desc}", dev)
+        if not self.port.count():
+            self.port.addItem("No serial ports found", "")
+        self.port.setCurrentIndex(max(self.port.findData(keep), 0))
+        self.port.blockSignals(False)
+        if self.port.currentData():
+            self.settings.setValue("serprog_port", self.port.currentData())
+
     def _install_driver(self) -> None:
         def done(setup):
             self._log(f"Started WCH driver installer: {setup}")
@@ -520,7 +605,7 @@ class ReadDialog(QDialog):
 
     def _detect(self) -> None:
         def job(_prog):
-            with open_reader() as r:
+            with self._open() as r:
                 return r.identify()
 
         def done(info: ChipInfo | None):
@@ -535,12 +620,18 @@ class ReadDialog(QDialog):
             self.detect_text.setText(f"<b>Found: {info.describe()}.</b>" + (f" {info.note}" if info.note else ""))
             self.family.setCurrentIndex(self.family.findData("spi_flash"))
             self._family_changed()
+            if info.family == "at45":
+                self.variant.clear()
+                self.variant.addItem(f"{human_size(info.size)} AT45 DataFlash (detected)", info.size)
             self.status.setText("Chip identified.")
             self._log(f"Detect: {info.describe()}")
         self._run(job, done, "Asking the chip for its ID...")
 
     def _chosen_chip(self) -> ChipInfo:
         fam = self.family.currentData()
+        if fam == "spi_flash" and self._detected and self._detected.family == "at45" \
+                and self.variant.currentIndex() == 0:
+            return self._detected
         if fam == "spi_flash":
             chip = spi_flash_chip(int(self.variant.currentData()))
             if self._detected and self._detected.size == chip.size:
@@ -595,12 +686,12 @@ class ReadDialog(QDialog):
             def xjob(prog):
                 return read_verified(lambda p: xgecu.read(name, None, p, check_id), prog, verify)
             self._run(xjob, lambda res: self._chip_done(chip, *res), f"Reading {name}...")
-        elif self._src() == "ch341a":
+        elif self._src() in SERIAL:
             chip = self._chosen_chip()
             verify = self.verify.isChecked()
 
             def job(prog):
-                with open_reader() as r:
+                with self._open() as r:
                     return read_verified(lambda p: r.read(chip, p, self._cancel.is_set), prog, verify)
             self._run(job, lambda res: self._chip_done(chip, *res), f"Reading {chip.name}...")
         else:

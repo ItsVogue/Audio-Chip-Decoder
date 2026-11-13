@@ -214,3 +214,103 @@ def test_read_a_parallel_eprom_through_an_xgecu_programmer(app, tmp_path, monkey
     _wait(dlg)
     assert "Poor contact on pin 5, 28" in dlg.result.text() and dlg.number.value() == 2
     settings.setValue("reader", "ch341a")
+
+
+# ------------------------------------------------------------------ 0.4.0 screens
+def test_sounds_list_marks_and_recent_menu(win, tmp_path):
+    assert win.sounds.topLevelItemCount() >= 2 and "silent gaps" in win.sounds_note.text()
+    win.sounds.setCurrentItem(win.sounds.topLevelItem(1))
+    s = win.sounds.topLevelItem(1).data(0, 0x0100)
+    assert win.wave._region == (s.start, s.end) and win.sound_btn.isEnabled()
+    win._play_sound()                                       # no sound device here: must not raise
+    win._fill_recent_menu()
+    first = win.recent_menu.actions()[0]
+    assert str(tmp_path / "set") in first.text() and first.isEnabled()
+
+
+def test_chip_format_sets_speed_and_lists_indexed_sounds(app, tmp_path, monkeypatch, voice):
+    from test_formats import upd_rom
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    (tmp_path / "Voice").mkdir()
+    (tmp_path / "Voice" / "u5.bin").write_bytes(upd_rom([voice[:16384], voice[30000:40240], voice[50000:58192]]))
+    w = MainWindow()
+    w.show()
+    w.load_paths([str(tmp_path / "Voice")])
+    _wait(w)
+    assert w.coll.hyp == Hypothesis("upd7759") and w.coll.rate == 8000
+    assert "chip format" in w.speed_chip.text() and "recognised" in w.enc_combo.itemText(0)
+    assert w.sounds.topLevelItemCount() == 3 and "index" in w.sounds_note.text()
+    assert "uPD7759" in w.formula.toPlainText() and w.wave._marks == []
+    w.close()
+
+
+def test_export_dialog_options_reach_the_exporter(win, tmp_path):
+    from audiochip.gui.dialogs import ExportDialog
+    d = ExportDialog(str(tmp_path / "out"), False, "summary", win, win.settings, 5)
+    assert "5 found" in d.per_sound.text() and d.fmt.currentData() == "wav" and not d.cleanup().any
+    d.fmt.setCurrentIndex(d.fmt.findData("flac"))
+    d.per_sound.setChecked(True)
+    d.c_level.setChecked(True)
+    d.c_hum.setCurrentIndex(2)
+    d._accept()
+    c = d.cleanup()
+    assert c.level and c.hum_hz == 60 and "same samples" in d.fmt_note.text()
+    again = ExportDialog(str(tmp_path / "out"), True, "summary", win, win.settings)
+    assert again.fmt.currentData() == "flac" and again.per_sound.isChecked() and again.cleanup().hum_hz == 60
+
+
+def test_speed_check_plays_all_three_in_turn(win):
+    from audiochip.gui.dialogs import ListeningCheck
+
+    class FakePlayer:
+        available = True
+
+        def __init__(self):
+            self.played = []
+
+        def play(self, x, rate, start=0):
+            self.played.append((len(x), rate))
+            return True
+
+        def stop(self):
+            pass
+    p = FakePlayer()
+    d = ListeningCheck(win._audio, [8000, 11025, 16000], 11025, p, win, {8000: "voice pitch 120 Hz"})
+    assert "voice pitch 120 Hz" in d._rows[0][0].text() and "1." in d._rows[0][0].text()
+    d._play_all()
+    assert p.played[0][1] == 8000 and d._rows[0][1].text() == "Playing" and d._timer.isActive()
+    d._next_turn()
+    d._next_turn()
+    assert [r for _, r in p.played] == [8000, 11025, 16000]
+    d._next_turn()
+    assert d._turn == -1 and d._rows[2][1].text() == "Play"
+    d._play(1)
+    assert not d._timer.isActive() and p.played[-1] == (len(d._clip), 11025)
+    d.reject()
+
+
+def test_version_notice_appears_only_for_a_newer_release(win):
+    from audiochip import __version__, update
+    assert update.is_newer("v9.0.0", __version__) and not update.is_newer(__version__, __version__)
+    assert not update.is_newer("0.1", "0.3.2") and not update.is_newer("", "0.3.2")
+    win._update_result(None)
+    win._update_result((__version__, update.PAGE))
+    assert win.update_btn.isHidden()
+    win._update_result(("9.1.0", update.PAGE))
+    assert not win.update_btn.isHidden() and "9.1.0" in win.update_btn.text()
+
+
+def test_read_dialog_adapts_to_each_serial_reader(app, tmp_path, monkeypatch):
+    from audiochip.gui.read_dialog import ReadDialog
+    f = tmp_path / "chip.bin"
+    f.write_bytes(bytes(range(256)) * 256)
+    monkeypatch.setenv("AUDIOCHIP_SIM", str(f))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    d = ReadDialog(QSettings("AudioChipDecoder", "AudioChipDecoder"))
+    d.show()
+    for kind, i2c in (("ch347", True), ("ft232h", False), ("serprog", False), ("ch341a", True)):
+        d.source.setCurrentIndex(d.source.findData(kind))
+        assert d._reader_ok and (d.family.findData("i2c_eeprom") >= 0) is i2c
+        assert d.port.isVisible() is (kind == "serprog") and d.wiring.isVisible() is (kind in ("ft232h", "serprog"))
+    d.open_after = []
+    d.close()

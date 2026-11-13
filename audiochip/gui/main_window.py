@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import datetime
 import html
+import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -13,10 +15,10 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDockWidget, 
                                QPushButton, QRadioButton, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTabWidget,
                                QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, __version__, profiles
-from ..codecs import CODECS, LAYOUTS, Hypothesis, decode, frames_for_bytes
+from .. import APP_NAME, __version__, profiles, update
+from ..codecs import CODECS, LAYOUTS, Hypothesis, decode, frames_for_bytes, is_structured
 from ..collection import Chip as ChipDump
-from ..collection import Collection, Track, build, chip_audio, measure_rates, move_chip, track_audio
+from ..collection import Collection, Track, build, chip_audio, measure_rates, move_chip, track_audio, track_sounds
 from ..export import ExportOptions, describe_reading, export
 from ..rate import STANDARD_RATES
 from .dialogs import HELP_HTML, ExportDialog, ListeningCheck, TextDialog
@@ -103,6 +105,14 @@ class MainWindow(QMainWindow):
         act("Read a chip", "Read a chip or memory card with your reader, then decode it.", self.read_chip)
         act("Open files", "Open one or more dump files (BIN, Intel HEX, S-record).", self.open_files)
         act("Open folder", "Open a folder of dumps. Each sub-folder becomes one track.", self.open_folder)
+        self.recent_btn = QToolButton()
+        self.recent_btn.setText("Recent")
+        self.recent_btn.setToolTip("Reopen files or folders you opened before.")
+        self.recent_btn.setPopupMode(QToolButton.InstantPopup)
+        self.recent_menu = QMenu(self)
+        self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
+        self.recent_btn.setMenu(self.recent_menu)
+        tb.addWidget(self.recent_btn)
         tb.addSeparator()
         self.profile_btn = QToolButton()
         self.profile_btn.setText("Device profiles")
@@ -112,7 +122,8 @@ class MainWindow(QMainWindow):
         self.profile_menu.aboutToShow.connect(self._fill_profile_menu)
         self.profile_btn.setMenu(self.profile_menu)
         tb.addWidget(self.profile_btn)
-        self.export_act = act("Export WAV", "Write WAV files and a report for the whole collection.", self.do_export)
+        self.export_act = act("Export audio", "Write WAV, FLAC or MP3 files and a report for the whole collection.",
+                              self.do_export)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
@@ -182,6 +193,31 @@ class MainWindow(QMainWindow):
         row.addWidget(self.up_btn)
         row.addWidget(self.down_btn)
         row.addStretch(1)
+        ll.addLayout(row)
+        self.sounds_cap = QLabel("SOUNDS IN THE SELECTION")
+        self.sounds_cap.setProperty("caption", True)
+        ll.addSpacing(6)
+        ll.addWidget(self.sounds_cap)
+        self.sounds = QTreeWidget()
+        self.sounds.setHeaderLabels(["Sound", "Starts", "Length"])
+        self.sounds.setRootIsDecorated(False)
+        self.sounds.setUniformRowHeights(True)
+        self.sounds.setColumnWidth(0, 196)
+        self.sounds.setColumnWidth(1, 70)
+        self.sounds.setToolTip("The separate sounds found in the selected track or chip. Click one to mark it "
+                               "on the waveform; double-click to play just that sound.")
+        self.sounds.currentItemChanged.connect(lambda *_: self._sound_selected())
+        self.sounds.itemDoubleClicked.connect(lambda *_: self._play_sound())
+        ll.addWidget(self.sounds, 1)
+        row = QHBoxLayout()
+        self.sound_btn = QPushButton("Play sound")
+        self.sound_btn.setToolTip("Play only the sound selected in the list.")
+        self.sound_btn.clicked.connect(self._play_sound)
+        self.sounds_note = QLabel()
+        self.sounds_note.setProperty("muted", True)
+        self.sounds_note.setWordWrap(True)
+        row.addWidget(self.sound_btn)
+        row.addWidget(self.sounds_note, 1)
         ll.addLayout(row)
         split.addWidget(left)
 
@@ -263,7 +299,7 @@ class MainWindow(QMainWindow):
         g.addWidget(QLabel("Speed"), 1, 0)
         self.rate_combo = QComboBox()
         self.rate_combo.setEditable(True)
-        self.rate_combo.setMinimumWidth(190)
+        self.rate_combo.setMinimumWidth(250)
         self.rate_combo.setToolTip("Playback speed in samples per second (Hz). Pick a standard speed or type one.")
         self.rate_combo.activated.connect(lambda *_: self._rate_chosen())
         self.rate_combo.lineEdit().editingFinished.connect(self._rate_chosen)
@@ -357,6 +393,11 @@ class MainWindow(QMainWindow):
         self.progress.setTextVisible(False)
         self.progress.hide()
         self.statusBar().addPermanentWidget(self.progress)
+        self.update_btn = QPushButton()
+        self.update_btn.setProperty("primary", True)
+        self.update_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(getattr(self, "_update_url", update.PAGE))))
+        self.update_btn.hide()
+        self.statusBar().addPermanentWidget(self.update_btn)
         self.statusBar().showMessage("Ready")
 
     # --------------------------------------------------------------------- utils
@@ -417,10 +458,63 @@ class MainWindow(QMainWindow):
         if paths:
             self.load_paths(paths)
 
+    # -------------------------------------------------------------------- recent
+    def _recent(self) -> list[list[str]]:
+        try:
+            items = json.loads(self.settings.value("recent", "[]") or "[]")
+        except (TypeError, ValueError):
+            return []
+        return [e for e in items if isinstance(e, list) and e and all(isinstance(p, str) for p in e)][:10]
+
+    def _remember(self, paths: list[str]) -> None:
+        entry = [str(Path(p)) for p in paths]
+        items = [entry] + [e for e in self._recent() if e != entry]
+        self.settings.setValue("recent", json.dumps(items[:10]))
+
+    def _fill_recent_menu(self) -> None:
+        self.recent_menu.clear()
+        items = self._recent()
+        if not items:
+            self.recent_menu.addAction("Nothing opened yet").setEnabled(False)
+            return
+        for entry in items:
+            first = Path(entry[0])
+            text = str(first) if len(entry) == 1 else f"{first.name} and {len(entry) - 1} more, in {first.parent}"
+            a = self.recent_menu.addAction(text)
+            a.setEnabled(all(Path(p).exists() for p in entry))
+            if not a.isEnabled():
+                a.setText(text + "  (not found)")
+            a.triggered.connect(lambda _=False, e=entry: self.load_paths(e))
+        self.recent_menu.addSeparator()
+        self.recent_menu.addAction("Clear this list").triggered.connect(
+            lambda: self.settings.setValue("recent", "[]"))
+
+    # ------------------------------------------------------------ version notice
+    def check_for_update(self) -> None:
+        """Once a day, ask GitHub whether a newer release exists. Silent unless there is one."""
+        today = datetime.date.today().isoformat()
+        if os.environ.get("AUDIOCHIP_NO_UPDATE_CHECK") or self.settings.value("update_checked", "") == today:
+            return
+        self.settings.setValue("update_checked", today)
+        self._update_worker = Worker(lambda _prog: update.latest_release(), self)
+        self._update_worker.finished_ok.connect(self._update_result)
+        self._update_worker.start()
+
+    def _update_result(self, found) -> None:
+        if not found or not update.is_newer(found[0], __version__):
+            return
+        version, url = found
+        self.log(f"Version {version} is available: {url}")
+        self.update_btn.setText(f"Version {version} is available - get it")
+        self.update_btn.setToolTip(f"You have {__version__}. Opens the download page:\n{url}")
+        self._update_url = url
+        self.update_btn.show()
+
     def load_paths(self, paths: list[str]):
         if self._worker is not None:
             return
         self._stop()
+        self._remember(paths)
         self.log("Opening: " + "; ".join(paths))
         self._run(lambda prog: build(paths, prog), self._loaded, "Analysing dumps")
 
@@ -474,10 +568,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{len(coll.tracks)} track(s), {n_chips} chip(s)")
 
     # ---------------------------------------------------------------------- tree
-    def _duration(self, nbytes: int, track: Track) -> str:
+    def _duration(self, nbytes: int, track: Track, chip: ChipDump | None = None) -> str:
         hyp, rate = self.coll.hyp_for(track), self.coll.rate_for(track)
         if not hyp or not rate:
             return ""
+        if is_structured(hyp):
+            chips = [chip] if chip is not None else track.members
+            return _clock(sum(len(decode(c.dump.data, hyp)) for c in chips) / rate)
         return _clock(frames_for_bytes(nbytes, hyp) / rate)
 
     def _fill_tree(self, keep: tuple | None = None):
@@ -501,7 +598,7 @@ class MainWindow(QMainWindow):
             if keep and keep[0] is t and keep[1] is None:
                 select = ti
             for c in t.chips:
-                ci = QTreeWidgetItem([c.name, self._duration(c.dump.size, t) if c.role != "blank" else "",
+                ci = QTreeWidgetItem([c.name, self._duration(c.dump.size, t, c) if c.role != "blank" else "",
                                       ROLE_TEXT.get(c.role, c.role)])
                 ci.setData(0, Qt.UserRole, (t, c))
                 if not c.in_track:
@@ -531,6 +628,9 @@ class MainWindow(QMainWindow):
         if hyp is None:
             return None, rate, [], None
         marks, pad_from = [], None
+        if is_structured(hyp):                 # the format has its own layout: no byte-for-byte positions
+            x = decode(chip.dump.data, hyp) if chip is not None else track_audio(self.coll, track)
+            return x, rate, marks, pad_from
         if chip is not None:
             x = decode(chip.dump.data, hyp) if not chip.in_track else chip_audio(self.coll, track, chip)
             if chip.structure.has_end_padding:
@@ -570,13 +670,17 @@ class MainWindow(QMainWindow):
         self.sel_label.setText(what)
         self.headline.setText(describe_reading(coll, track) if hyp else "No audio encoding recognised")
         det = coll.detection if not track.hyp_override else track.detection
-        if coll.hyp_source != "auto" or track.hyp_override:
+        if track.hyp_override and track.override_auto:
+            self.enc_chip.set(f"Encoding: {track.detection.confidence} confidence", track.detection.confidence)
+        elif coll.hyp_source != "auto" or track.hyp_override:
             src = "set by hand" if coll.hyp_source == "user" or track.hyp_override else coll.hyp_source
             self.enc_chip.set(f"Encoding: {src}", "warn" if src == "set by hand" else "ok")
         else:
             self.enc_chip.set(f"Encoding: {det.confidence} confidence", det.confidence)
         if coll.rate_confirmed:
             self.speed_chip.set("Speed: confirmed", "ok")
+        elif track.rate_stated and rate == track.rate_stated:
+            self.speed_chip.set("Speed: set by the chip format", "ok")
         else:
             self.speed_chip.set("Speed: estimated, not confirmed by ear", "warn")
         notes = list(track.warnings)
@@ -598,11 +702,55 @@ class MainWindow(QMainWindow):
         self.down_btn.setEnabled(chip is not None and chip.in_track)
         self.play_btn.setEnabled(x is not None and len(x) > 0)
         self.check_btn.setEnabled(x is not None and len(x) > 0)
-        self.check_btn.setProperty("primary", not coll.rate_confirmed)
+        self.check_btn.setProperty("primary", not coll.rate_confirmed and not track.rate_stated)
         self.check_btn.style().unpolish(self.check_btn)
         self.check_btn.style().polish(self.check_btn)
         self._update_pos(0)
+        self._fill_sounds(track, chip, x)
         self._refresh_details(track, chip)
+
+    # -------------------------------------------------------------------- sounds
+    def _fill_sounds(self, track: Track, chip: ChipDump | None, x) -> None:
+        self.sounds.blockSignals(True)
+        self.sounds.clear()
+        found, basis = [], ""
+        rate = self._audio_rate or 1
+        if x is not None and len(x):
+            try:
+                found, basis = track_sounds(self.coll, track, x, chip)
+            except Exception as e:                      # splitting is a convenience; never block the decode
+                self.log(f"Could not split into sounds: {e}")
+        self._sounds = found
+        for s in found:
+            it = QTreeWidgetItem([s.label, _clock(s.start / rate), _clock((s.end - s.start) / rate)])
+            it.setData(0, Qt.UserRole, s)
+            if s.offset >= 0:
+                it.setToolTip(0, f"Starts at byte 0x{s.offset:X} of the dump")
+            self.sounds.addTopLevelItem(it)
+        self.sounds.blockSignals(False)
+        self.sounds_cap.setText(f"SOUNDS IN THE SELECTION ({len(found)})" if found else "SOUNDS IN THE SELECTION")
+        self.sounds_note.setText(f"Found by {basis}." if found else
+                                 "No separate sounds found." if x is not None and len(x) else "")
+        self.sound_btn.setEnabled(False)
+        self.wave.set_sounds([s.start for s in found] if len(found) > 1 else [])
+
+    def _sound_selected(self) -> None:
+        it = self.sounds.currentItem()
+        s = it.data(0, Qt.UserRole) if it else None
+        self.sound_btn.setEnabled(s is not None)
+        self.wave.set_region((s.start, s.end) if s else None)
+
+    def _play_sound(self) -> None:
+        it = self.sounds.currentItem()
+        s = it.data(0, Qt.UserRole) if it else None
+        if s is None or self._audio is None:
+            return
+        self._stop()
+        self.player.rewind()
+        if self.player.play(self._audio[s.start:s.end], self._audio_rate, 0):
+            self.statusBar().showMessage(f"Playing {s.label}")
+        else:
+            self.statusBar().showMessage(why_no_sound())
 
     def _fill_controls(self, track: Track):
         coll = self.coll
@@ -613,7 +761,8 @@ class MainWindow(QMainWindow):
         seen = set()
         for i, c in enumerate(det.candidates[:8]):
             tag = "  (best match)" if i == 0 else ""
-            self.enc_combo.addItem(f"{c.hyp.label()}   {100 * c.leak:.2f}%{tag}", c.hyp.key)
+            measure = "recognised" if c.evidence else f"{100 * c.leak:.2f}%"
+            self.enc_combo.addItem(f"{c.hyp.label()}   {measure}{tag}", c.hyp.key)
             seen.add(c.hyp.key)
         self.enc_combo.insertSeparator(self.enc_combo.count())
         for codec in CODECS.values():
@@ -630,7 +779,9 @@ class MainWindow(QMainWindow):
         self.rate_combo.clear()
         best = coll.rate_estimate.best if coll.rate_estimate.informed else None
         for r in STANDARD_RATES:
-            self.rate_combo.addItem(f"{r}" + ("  (estimate)" if r == best else ""), r)
+            tag = ("  (from the chip format)" if r == track.rate_stated else
+                   "  (estimate)" if r == best and not coll.rate_estimate.fixed else "")
+            self.rate_combo.addItem(f"{r}" + tag, r)
         i = self.rate_combo.findData(rate)
         if i >= 0:
             self.rate_combo.setCurrentIndex(i)
@@ -652,7 +803,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ settings edits
     def _after_settings_change(self, remeasure: bool):
         track, chip = self.current()
-        if remeasure and not self.coll.rate_confirmed:
+        if remeasure:                           # keeps a confirmed speed; refreshes what each format states
             self.setCursor(Qt.BusyCursor)
             measure_rates(self.coll)
             self.unsetCursor()
@@ -668,6 +819,7 @@ class MainWindow(QMainWindow):
         hyp = Hypothesis.from_key(key)
         if self.scope_track.isChecked():
             track.hyp_override = hyp if hyp != self.coll.hyp else None
+            track.override_auto = False
             self.log(f"Encoding for track {track.name} set by hand: {hyp.label()}.")
         else:
             best = self.coll.detection.best
@@ -724,6 +876,7 @@ class MainWindow(QMainWindow):
             tb = t.detection.best
             t.hyp_override = (tb.hyp if coll.hyp and tb and t.detection.confidence == "high" and tb.hyp != coll.hyp
                               and not tb.hyp.is_twin_of(coll.hyp) else None)
+            t.override_auto = t.hyp_override is not None
         self.scope_all.setChecked(True)
         self.log("Back to the automatic encoding and speed estimate.")
         self._after_settings_change(remeasure=True)
@@ -835,7 +988,9 @@ class MainWindow(QMainWindow):
         current = self.coll.rate_for(track)
         if current not in rates:
             rates = sorted(set(rates[:2] + [current]))[:3] if len(rates) >= 2 else rates
-        dlg = ListeningCheck(self._audio, rates, current, self.player, self)
+        reasons = {g.rate: g.why() for g in self.coll.rate_estimate.shortlist} \
+            if self.coll.rate_estimate.informed and not self.coll.rate_estimate.fixed else {}
+        dlg = ListeningCheck(self._audio, rates, current, self.player, self, reasons)
         if dlg.exec() and dlg.chosen:
             self.coll.rate = dlg.chosen
             self.coll.rate_confirmed = True
@@ -850,18 +1005,20 @@ class MainWindow(QMainWindow):
         if coll is None:
             return
         if coll.hyp is None:
-            QMessageBox.information(self, "Export WAV files", "No encoding is set yet. Pick one from the "
-                                                              "Encoding list, check it by ear, then export.")
+            QMessageBox.information(self, "Export audio files", "No encoding is set yet. Pick one from the "
+                                                                "Encoding list, check it by ear, then export.")
             return
         self._stop()
         base = Path(self.settings.value("last_export", "") or coll.tracks[0].folder.parent)
         name = (coll.tracks[0].folder.parent.name if len(coll.tracks) > 1 else coll.tracks[0].name) or "dumps"
-        dlg = ExportDialog(str(base / f"{name} - WAV"), coll.rate_confirmed, describe_reading(coll), self)
+        dlg = ExportDialog(str(base / f"{name} - audio"), coll.rate_confirmed or coll.rate_estimate.fixed,
+                           describe_reading(coll), self, self.settings, len(getattr(self, "_sounds", [])))
         if not dlg.exec():
             return
         out = dlg.out_dir()
         opts = ExportOptions(per_chip=dlg.per_chip.isChecked(), joined=dlg.joined.isChecked(),
-                             trim_padding=dlg.trim.isChecked())
+                             trim_padding=dlg.trim.isChecked(), per_sound=dlg.per_sound.isChecked(),
+                             fmt=dlg.fmt.currentData(), cleanup=dlg.cleanup())
         self.settings.setValue("last_export", str(out.parent))
         self.log(f"Exporting to {out}")
         self._run(lambda prog: (export(coll, out, opts, prog), out), self._exported, "Exporting")
@@ -921,7 +1078,7 @@ class MainWindow(QMainWindow):
 
         H.append("<h3>Speed</h3>")
         H.append(f"<p><b>{coll.rate_for(track):,} Hz, "
-                 f"{'confirmed' if coll.rate_confirmed else 'estimated, not confirmed by ear'}.</b> "
+                 f"{'confirmed' if coll.rate_confirmed else 'set by the chip format' if coll.rate_estimate.fixed else 'estimated, not confirmed by ear'}.</b> "
                  f"{e(coll.rate_estimate.reason)}</p>")
         if coll.rate_estimate.informed:
             rows = ["<table cellspacing='0' cellpadding='4' width='100%'><tr><th align='left'>Speed</th>"
@@ -988,18 +1145,19 @@ class MainWindow(QMainWindow):
             G = [f"<h3>{e(c.name)}</h3><p>{e(c.plain)}</p>",
                  f"<p>Bytes are taken {e(LAYOUTS[hyp.layout][0])}, "
                  + ("as one channel." if hyp.channels == 1 else f"alternating between {hyp.channels} channels.")
-                 + f" Each sample uses {c.bytes_per_sample:g} byte{'s' if c.bytes_per_sample != 1 else ''}.</p>",
+                 + ("" if c.structured else f" Each sample uses {c.bytes_per_sample:g} "
+                    f"byte{'s' if c.bytes_per_sample != 1 else ''}.") + "</p>",
                  f"<p><b>Formula</b> (b is a stored byte; the result is a 16-bit sample):</p><pre style='white-space: pre-wrap'>{e(c.formula)}</pre>"]
             src = chip or (track.members[0] if track.members else None)
-            if src is not None and c.family != "adpcm":
+            if src is not None and c.family not in ("adpcm", "delta", "chip"):
                 start = src.structure.lead_len if src.structure.has_start_marker else 0
                 piece = src.dump.data[start:start + 8 * max(int(c.bytes_per_sample), 1) * hyp.channels]
                 vals = decode(piece, hyp).reshape(-1)[:8]
                 G.append(f"<p><b>Worked example</b> from {e(src.name)} at offset 0x{start:X}:</p><pre>"
                          f"bytes   : {' '.join(f'{b:02X}' for b in piece)}\n"
                          f"samples : {' '.join(str(int(v)) for v in vals)}</pre>")
-            G.append(f"<p>Playback: {coll.rate_for(track):,} samples per second. Output files are 16-bit PCM WAV "
-                     "with no filtering, volume change or pitch change.</p>")
+            G.append(f"<p>Playback: {coll.rate_for(track):,} samples per second. A plain export writes these "
+                     "samples unchanged; any clean-up you tick on export is listed in Report.txt.</p>")
             self.formula.setHtml("".join(G))
         else:
             self.formula.setHtml("<p>No encoding is in force.</p>")
