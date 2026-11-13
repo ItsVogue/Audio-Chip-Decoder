@@ -272,7 +272,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.clicked.connect(self._rewind)
         self.pos_label = QLabel("0:00.0 / 0:00.0")
         self.pos_label.setFont(_mono_font())
-        self.check_btn = QPushButton("Check speed by ear")
+        self.check_btn = QPushButton("Set speed by ear")
         self.check_btn.setToolTip("Play the same clip at three speeds and pick the natural one.")
         self.check_btn.clicked.connect(self.listening_check)
         transport.addWidget(self.play_btn)
@@ -677,7 +677,7 @@ class MainWindow(QMainWindow):
             self.enc_chip.set(f"Encoding: {src}", "warn" if src == "set by hand" else "ok")
         else:
             self.enc_chip.set(f"Encoding: {det.confidence} confidence", det.confidence)
-        if coll.rate_confirmed:
+        if coll.rate_confirmed or track.rate_confirmed:
             self.speed_chip.set("Speed: confirmed", "ok")
         elif track.rate_stated and rate == track.rate_stated:
             self.speed_chip.set("Speed: set by the chip format", "ok")
@@ -702,7 +702,7 @@ class MainWindow(QMainWindow):
         self.down_btn.setEnabled(chip is not None and chip.in_track)
         self.play_btn.setEnabled(x is not None and len(x) > 0)
         self.check_btn.setEnabled(x is not None and len(x) > 0)
-        self.check_btn.setProperty("primary", not coll.rate_confirmed and not track.rate_stated)
+        self.check_btn.setProperty("primary", not (coll.rate_confirmed or track.rate_confirmed or track.rate_stated))
         self.check_btn.style().unpolish(self.check_btn)
         self.check_btn.style().polish(self.check_btn)
         self._update_pos(0)
@@ -846,11 +846,13 @@ class MainWindow(QMainWindow):
             return
         if self.scope_track.isChecked():
             track.rate_override = rate if rate != self.coll.rate else None
+            track.rate_confirmed = False
             self.log(f"Speed for track {track.name} set to {rate:,} Hz.")
         else:
             self.coll.rate = rate
             for t in self.coll.tracks:
                 t.rate_override = None
+                t.rate_confirmed = False
             self.log(f"Speed for the collection set to {rate:,} Hz.")
         self._after_settings_change(remeasure=False)
 
@@ -873,6 +875,7 @@ class MainWindow(QMainWindow):
         coll.rate_confirmed = False
         for t in coll.tracks:
             t.rate_override = None
+            t.rate_confirmed = False
             tb = t.detection.best
             t.hyp_override = (tb.hyp if coll.hyp and tb and t.detection.confidence == "high" and tb.hyp != coll.hyp
                               and not tb.hyp.is_twin_of(coll.hyp) else None)
@@ -903,6 +906,7 @@ class MainWindow(QMainWindow):
         coll.rate, coll.rate_confirmed = p.rate, True
         for t in coll.tracks:
             t.hyp_override = t.rate_override = None
+            t.rate_confirmed = False
         self.scope_all.setChecked(True)
         self.log(f"Applied profile {p.name}: {p.hyp.label()}, {p.rate:,} Hz.")
         self._after_settings_change(remeasure=False)
@@ -983,20 +987,35 @@ class MainWindow(QMainWindow):
         if self.coll is None or self._audio is None or len(self._audio) == 0:
             return
         self._stop()
-        track, _ = self.current()
-        rates = self.coll.rate_estimate.top(3)
-        current = self.coll.rate_for(track)
-        if current not in rates:
-            rates = sorted(set(rates[:2] + [current]))[:3] if len(rates) >= 2 else rates
-        reasons = {g.rate: g.why() for g in self.coll.rate_estimate.shortlist} \
-            if self.coll.rate_estimate.informed and not self.coll.rate_estimate.fixed else {}
-        dlg = ListeningCheck(self._audio, rates, current, self.player, self, reasons)
+        track, chip = self.current()
+        coll = self.coll
+        current = coll.rate_for(track)
+        est = coll.rate_estimate
+        informed = est.informed and not est.fixed
+        reasons = {g.rate: g.why() for g in est.shortlist} if informed else {}
+        # the measured pitch period lets the dialog show what voice pitch each speed gives
+        ev = [c.rate_evidence for c in ([chip] if chip is not None else track.members)
+              if c.rate_evidence and c.rate_evidence.speech_like]
+        period = float(np.median([e.period for e in ev])) if ev else 0.0
+        _, _, _, pad_from = self._selection_audio(track, chip)
+        dlg = ListeningCheck(self._audio, est.top(3) if informed else [], current, self.player, self, reasons,
+                             pitch_period=period, content_frames=pad_from or len(self._audio),
+                             track_name=track.name, track_only=self.scope_track.isChecked(),
+                             many_tracks=len(coll.tracks) > 1)
         if dlg.exec() and dlg.chosen:
-            self.coll.rate = dlg.chosen
-            self.coll.rate_confirmed = True
-            for t in self.coll.tracks:
-                t.rate_override = None
-            self.log(f"Speed confirmed by ear: {dlg.chosen:,} Hz.")
+            if dlg.track_only and len(coll.tracks) > 1:
+                track.rate_override = dlg.chosen if dlg.chosen != coll.rate or track.rate_stated else None
+                track.rate_confirmed = True
+                self.scope_track.setChecked(True)
+                self.log(f"Speed for track {track.name} set by ear: {dlg.chosen:,} Hz.")
+            else:
+                coll.rate = dlg.chosen
+                coll.rate_confirmed = True
+                for t in coll.tracks:
+                    t.rate_override = None
+                    t.rate_confirmed = False
+                self.scope_all.setChecked(True)
+                self.log(f"Speed set by ear: {dlg.chosen:,} Hz.")
             self._after_settings_change(remeasure=False)
 
     # -------------------------------------------------------------------- export

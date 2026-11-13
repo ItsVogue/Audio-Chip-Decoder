@@ -52,6 +52,7 @@ class Track:
     rate_override: int | None = None
     override_auto: bool = False          # the override came from detection, not from the user
     rate_stated: int = 0                 # playback speed carried by the chip format itself, if any
+    rate_confirmed: bool = False         # this track's own speed was set by ear
 
     @property
     def members(self) -> list[Chip]:

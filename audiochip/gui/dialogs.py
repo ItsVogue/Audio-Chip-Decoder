@@ -4,18 +4,18 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame, QGridLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextBrowser, QVBoxLayout)
+                               QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QSlider, QSpinBox,
+                               QTextBrowser, QVBoxLayout)
 
 from ..cleanup import Cleanup
 from ..export import FORMATS
 
 from .player import Player, why_no_sound
 
-CLIP_SECONDS = 6
-LADDER = [4000, 5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000]
+CLIP_SECONDS = 8
 
 
 def loudest_clip(x: np.ndarray, frames: int) -> np.ndarray:
@@ -31,172 +31,341 @@ def loudest_clip(x: np.ndarray, frames: int) -> np.ndarray:
     return x[start:start + frames]
 
 
+SPEED_MIN, SPEED_MAX = 3000, 64000
+SLIDER_STEPS = 1200                      # about 0.25% per step across the whole range
+SNAP_WITHIN = 0.015                      # snap to a standard speed when within 1.5% of it
+PRESETS = (4000, 5512, 6000, 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000)
+
+
+def slider_to_rate(value: int) -> int:
+    """The slider is logarithmic, so each step changes the pitch by the same small amount."""
+    rate = SPEED_MIN * (SPEED_MAX / SPEED_MIN) ** (value / SLIDER_STEPS)
+    return int(round(rate / 5.0) * 5)
+
+
+def rate_to_slider(rate: float) -> int:
+    rate = min(max(rate, SPEED_MIN), SPEED_MAX)
+    return int(round(SLIDER_STEPS * np.log(rate / SPEED_MIN) / np.log(SPEED_MAX / SPEED_MIN)))
+
+
+def parse_length(text: str) -> float | None:
+    """Seconds from "83.5", "1:23" or "1:23.5"."""
+    text = text.strip().replace(",", ".")
+    try:
+        parts = [float(p) for p in text.split(":")]
+    except ValueError:
+        return None
+    if not 1 <= len(parts) <= 3 or any(p < 0 for p in parts):
+        return None
+    seconds = 0.0
+    for p in parts:
+        seconds = seconds * 60 + p
+    return seconds if seconds > 0 else None
+
+
 class ListeningCheck(QDialog):
-    """Play the same clip at three speeds and let the user pick the natural one."""
+    """Set the speed by ear: the sound keeps playing while a slider changes its speed."""
 
     def __init__(self, audio: np.ndarray, rates: list[int], current: int, player: Player, parent=None,
-                 reasons: dict[int, str] | None = None):
+                 reasons: dict[int, str] | None = None, pitch_period: float = 0.0,
+                 content_frames: int | None = None, track_name: str = "", track_only: bool = False,
+                 many_tracks: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("Check the speed by ear")
-        self.setMinimumWidth(640)
-        self._reasons = reasons or {}
-        self._turn = -1
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self._next_turn)
+        self.setWindowTitle("Set the speed by ear")
+        self.setMinimumWidth(720)
         self.player = player
         self.chosen: int | None = None
-        self._rates = sorted(rates)
+        self.track_only = track_only
         self._audio = audio
-        self._current = current
+        self._likely = sorted(rates)
+        self._reasons = reasons or {}
+        self._period = pitch_period
+        self._content = content_frames or len(audio)
+        self._rate = int(min(max(current or 8000, SPEED_MIN), SPEED_MAX))
+        self._start_rate = self._rate
+        self._want_play = False
+        self._setting = False
+        self._live = QTimer(self)                 # waits for the slider to settle before restarting the sound
+        self._live.setSingleShot(True)
+        self._live.setInterval(90)
+        self._live.timeout.connect(self._apply_live)
+        self._poll = QTimer(self)
+        self._poll.setInterval(60)
+        self._poll.timeout.connect(self._tick)
 
         lay = QVBoxLayout(self)
-        lay.setSpacing(12)
-        intro = QLabel("The playback speed is not stored on a chip, so it has to be confirmed by listening. "
-                       "The same few seconds play at three speeds. Pick the one where voices and "
-                       "instruments sound natural.")
+        lay.setSpacing(10)
+        intro = QLabel("Most chips do not store their playback speed, so it is set by listening. Press <b>Play</b>, "
+                       "then drag the slider or click a speed until voices and instruments sound natural. "
+                       "The sound keeps playing while you change it.")
         intro.setWordWrap(True)
         lay.addWidget(intro)
-        top = QHBoxLayout()
-        self.all_btn = QPushButton("Play all three in turn")
-        self.all_btn.setProperty("primary", True)
-        self.all_btn.setToolTip("Plays a short clip at each speed, one after the other, and shows which one "
-                                "is playing. Keys 1, 2 and 3 play a single speed.")
-        self.all_btn.clicked.connect(self._play_all)
-        self.now = QLabel("Keys: 1, 2, 3 play a speed. Space plays all three.")
-        self.now.setProperty("muted", True)
-        top.addWidget(self.all_btn)
-        top.addWidget(self.now, 1)
-        lay.addLayout(top)
-        for key, k in (("1", 0), ("2", 1), ("3", 2)):
-            QShortcut(QKeySequence(key), self, activated=lambda k=k: self._play(k))
-        QShortcut(QKeySequence("Space"), self, activated=self._play_all)
 
-        self.grid = QGridLayout()
-        self.grid.setHorizontalSpacing(12)
-        self.grid.setVerticalSpacing(8)
-        lay.addLayout(self.grid)
-        self._rows: list[tuple[QLabel, QPushButton, QPushButton]] = []
-        for i in range(3):
-            label = QLabel()
-            label.setMinimumWidth(190)
-            play = QPushButton("Play")
-            pick = QPushButton("This one sounds natural")
-            pick.setProperty("primary", True)
-            play.clicked.connect(lambda _=False, k=i: self._play(k))
-            pick.clicked.connect(lambda _=False, k=i: self._pick(k))
-            self.grid.addWidget(label, i, 0)
-            self.grid.addWidget(play, i, 1)
-            self.grid.addWidget(pick, i, 2)
-            self._rows.append((label, play, pick))
+        top = QHBoxLayout()
+        self.play_btn = QPushButton("Play")
+        self.play_btn.setProperty("primary", True)
+        self.play_btn.setMinimumWidth(110)
+        self.play_btn.clicked.connect(self.toggle_play)
+        self.readout = QLabel()
+        self.readout.setStyleSheet("font-size: 26px; font-weight: 600;")
+        self.readout.setMinimumWidth(190)
+        self.spin = QSpinBox()
+        self.spin.setRange(SPEED_MIN, SPEED_MAX)
+        self.spin.setSingleStep(50)
+        self.spin.setSuffix(" Hz")
+        self.spin.setGroupSeparatorShown(True)
+        self.spin.setMinimumWidth(130)
+        self.spin.setToolTip("Type an exact speed here if you know it, for example from the board's documentation.")
+        self.spin.valueChanged.connect(lambda v: self._set_rate(v, snap=False))
+        top.addWidget(self.play_btn)
+        top.addSpacing(12)
+        top.addWidget(self.readout)
+        top.addStretch(1)
+        top.addWidget(QLabel("Exact speed"))
+        top.addWidget(self.spin)
+        lay.addLayout(top)
+
+        srow = QHBoxLayout()
+        slow = QLabel("slower, lower")
+        fast = QLabel("faster, higher")
+        slow.setProperty("muted", True)
+        fast.setProperty("muted", True)
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, SLIDER_STEPS)
+        self.slider.setSingleStep(4)                  # arrow keys: about 1%
+        self.slider.setPageStep(20)
+        self.slider.setMinimumHeight(28)
+        self.slider.setToolTip("Drag while the sound plays. With the slider selected, the Left and Right arrow "
+                               "keys change the speed by about 1%. Space starts and stops the sound.")
+        self.slider.valueChanged.connect(self._slider_moved)
+        srow.addWidget(slow)
+        srow.addWidget(self.slider, 1)
+        srow.addWidget(fast)
+        lay.addLayout(srow)
+
+        nrow = QHBoxLayout()
+        nrow.setSpacing(6)
+        for text, factor, tip in (("-5%", 0.95, "5% slower"), ("-1%", 0.99, "1% slower"),
+                                  ("+1%", 1.01, "1% faster"), ("+5%", 1.05, "5% faster")):
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            b.setFixedWidth(64)
+            b.clicked.connect(lambda _=False, f=factor: self._set_rate(self._rate * f, snap=False))
+            nrow.addWidget(b)
+        nrow.addSpacing(10)
+        for text, factor, tip in (("Half", 0.5, "Half the speed: one octave lower"),
+                                  ("Double", 2.0, "Twice the speed: one octave higher")):
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, f=factor: self._set_rate(self._rate * f, snap=True))
+            nrow.addWidget(b)
+        nrow.addStretch(1)
+        self.snap = QCheckBox("Snap to standard speeds")
+        self.snap.setChecked(True)
+        self.snap.setToolTip("When the slider comes within 1.5% of a standard speed it lands exactly on it. "
+                             "Untick for boards that run at an odd speed.")
+        nrow.addWidget(self.snap)
+        lay.addLayout(nrow)
+
+        lay.addWidget(QLabel("<b>Standard speeds</b> (the app's best guesses are marked)"))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
+        self._preset_btns: dict[int, QPushButton] = {}
+        for i, r in enumerate(PRESETS):
+            b = QPushButton(f"{r:,}")
+            b.setCheckable(True)
+            why = self._reasons.get(r, "")
+            if r in self._likely:
+                b.setText(f"{r:,}  *")
+                b.setToolTip("One of the app's best guesses" + (f": {why}." if why else "."))
+            elif why:
+                b.setToolTip(why[0].upper() + why[1:] + ".")
+            b.clicked.connect(lambda _=False, r=r: self._set_rate(r, snap=False))
+            grid.addWidget(b, i // 6, i % 6)
+            self._preset_btns[r] = b
+        lay.addLayout(grid)
+
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        self.info.setMinimumHeight(40)
+        self.info.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        lay.addWidget(self.info)
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         lay.addWidget(line)
-        lay.addWidget(QLabel("<b>None of them right?</b>"))
-        for text, button, direction in (("All three sound too fast or high-pitched", "Try slower speeds", -1),
-                                        ("All three sound too slow or low-pitched", "Try faster speeds", +1)):
-            row = QHBoxLayout()
-            b = QPushButton(button)
-            b.setMinimumWidth(160)
-            b.clicked.connect(lambda _=False, d=direction: self._shift(d))
-            row.addWidget(QLabel(text), 1)
-            row.addWidget(b)
-            lay.addLayout(row)
+
+        opts = QHBoxLayout()
+        self.loop = QCheckBox("Repeat")
+        self.loop.setChecked(True)
+        self.clip_box = QComboBox()
+        self.clip_box.addItem("Play the busiest 8 seconds", "clip")
+        self.clip_box.addItem("Play the whole selection", "all")
+        self.clip_box.currentIndexChanged.connect(self._clip_changed)
+        opts.addWidget(self.clip_box)
+        opts.addWidget(self.loop)
+        opts.addStretch(1)
+        lay.addLayout(opts)
+
+        lrow = QHBoxLayout()
+        self.length = QLineEdit()
+        self.length.setPlaceholderText("m:ss")
+        self.length.setFixedWidth(90)
+        self.length.returnPressed.connect(self._from_length)
+        lbtn = QPushButton("Set speed from length")
+        lbtn.setToolTip("If you know how long this sound should last (from the original record, film or game), "
+                        "the speed follows exactly: samples divided by seconds.")
+        lbtn.clicked.connect(self._from_length)
+        lrow.addWidget(QLabel("Know how long it should last?"))
+        lrow.addWidget(self.length)
+        lrow.addWidget(lbtn)
+        lrow.addStretch(1)
+        lay.addLayout(lrow)
 
         self.note = QLabel()
         self.note.setWordWrap(True)
         self.note.setProperty("muted", True)
         lay.addWidget(self.note)
 
+        self.scope_all = QRadioButton("Use it for everything that is open")
+        self.scope_track = QRadioButton(f"Use it for this track only ({track_name})" if track_name
+                                        else "Use it for this track only")
+        self.scope_track.setToolTip("For when boards that ran at different speeds are open together.")
+        (self.scope_track if track_only else self.scope_all).setChecked(True)
+        if many_tracks:
+            sc = QHBoxLayout()
+            sc.addWidget(self.scope_all)
+            sc.addWidget(self.scope_track)
+            sc.addStretch(1)
+            lay.addLayout(sc)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
-        stop = buttons.addButton("Stop sound", QDialogButtonBox.ActionRole)
-        stop.clicked.connect(self.player.stop)
+        self.ok_btn = buttons.addButton("Use this speed", QDialogButtonBox.AcceptRole)
+        self.ok_btn.setProperty("primary", True)
+        buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
-        self._fill()
+
+        QShortcut(QKeySequence(Qt.Key_Space), self, activated=self.toggle_play)
+        self._clip_changed()
+        self._set_rate(self._rate, snap=False)
+        self.slider.setFocus()
         if not self.player.available:
             self.note.setText(why_no_sound())
 
-    def _fill(self) -> None:
-        for i, ((label, _, _), rate) in enumerate(zip(self._rows, self._rates)):
-            mark = "  (current)" if rate == self._current else ""
-            why = self._reasons.get(rate, "")
-            label.setText(f"<b>{i + 1}.&nbsp; {rate:,} Hz</b>{mark}"
-                          + (f"<br><span style='color:#93A0B4'>{why}</span>" if why else ""))
-        mid = self._rates[1]
-        clip = loudest_clip(self._audio, CLIP_SECONDS * mid)
-        self._clip = clip
-        self.note.setText(f"Clip: {len(clip):,} samples from the busiest part of the selection. It lasts "
-                          + ", ".join(f"{len(clip) / r:.1f} s at {r:,} Hz" for r in self._rates) + ".")
+    # ------------------------------------------------------------------ speed
+    @property
+    def rate(self) -> int:
+        return self._rate
 
-    def _play(self, k: int) -> None:
-        self._timer.stop()
-        self._turn = -1
-        self._mark(k)
-        if not self.player.play(self._clip, self._rates[k]):
-            self.note.setText(why_no_sound())
+    def _slider_moved(self, value: int) -> None:
+        if not self._setting:
+            self._set_rate(slider_to_rate(value), snap=self.snap.isChecked(), from_slider=True)
 
-    def _mark(self, k: int) -> None:
-        for i, (label, play, _) in enumerate(self._rows):
-            play.setText("Playing" if i == k else "Play")
-        self.now.setText(f"Playing {self._rates[k]:,} Hz" if k >= 0 else
-                         "Keys: 1, 2, 3 play a speed. Space plays all three.")
+    def _set_rate(self, rate: float, snap: bool, from_slider: bool = False) -> None:
+        rate = float(min(max(rate, SPEED_MIN), SPEED_MAX))
+        if snap:
+            near = min(PRESETS, key=lambda p: abs(np.log(p / rate)))
+            if abs(np.log(near / rate)) <= SNAP_WITHIN:
+                rate = near
+        rate = int(round(rate))
+        changed = rate != self._rate
+        self._rate = rate
+        self._setting = True
+        if not from_slider:
+            self.slider.setValue(rate_to_slider(rate))
+        self.spin.setValue(rate)
+        self._setting = False
+        self.readout.setText(f"{rate:,} Hz")
+        for r, b in self._preset_btns.items():
+            b.setChecked(r == rate)
+        self._describe()
+        if changed and self._want_play:
+            self._live.start()
 
-    def _play_all(self) -> None:
-        """Half the clip at each speed, back to back, so the three can be compared in a few seconds."""
-        self.player.stop()
-        self._turn = -1
-        self._next_turn()
+    def _describe(self) -> None:
+        rate = self._rate
+        parts = []
+        if self._period > 0:
+            parts.append(f"Voice pitch at this speed: <b>{rate / self._period:.0f} Hz</b>. Speaking voices are "
+                         "usually 85 to 155 Hz for men, 165 to 255 Hz for women, and higher for children.")
+        secs = self._content / rate
+        parts.append(f"The selection lasts <b>{int(secs // 60)}:{secs % 60:04.1f}</b> at this speed.")
+        if rate != self._start_rate:
+            pct = 100 * (rate / self._start_rate - 1)
+            parts.append(f"{abs(pct):.1f}% {'faster' if pct > 0 else 'slower'} than the {self._start_rate:,} Hz "
+                         "it was set to.")
+        self.info.setText(" ".join(parts))
 
-    def _next_turn(self) -> None:
-        self._turn += 1
-        if self._turn >= len(self._rates):
-            self._turn = -1
-            self._mark(-1)
+    def _from_length(self) -> None:
+        seconds = parse_length(self.length.text())
+        if seconds is None:
+            self.note.setText("Type the length as minutes and seconds, for example 1:23 or 0:07.5.")
             return
-        rate = self._rates[self._turn]
-        clip = self._clip[: len(self._clip) // 2]
-        self._mark(self._turn)
-        if not self.player.play(clip, rate):
-            self.note.setText(why_no_sound())
-            self._turn = -1
-            self._mark(-1)
+        rate = self._content / seconds
+        if not SPEED_MIN <= rate <= SPEED_MAX:
+            self.note.setText(f"That length would need {rate:,.0f} Hz, which is outside {SPEED_MIN:,} to "
+                              f"{SPEED_MAX:,} Hz. Check the length, or whether the whole track is selected.")
             return
-        self._timer.start(int(1000 * len(clip) / rate) + 450)
+        self.note.setText(f"{self._content:,} samples in {seconds:.1f} seconds is {rate:,.0f} Hz.")
+        self._set_rate(rate, snap=self.snap.isChecked())
 
-    def _pick(self, k: int) -> None:
-        self._timer.stop()
+    # --------------------------------------------------------------- playback
+    def _clip_changed(self) -> None:
+        was = self._want_play
+        self._halt()
+        if self.clip_box.currentData() == "all":
+            self._clip = self._audio
+        else:
+            self._clip = loudest_clip(self._audio, CLIP_SECONDS * max(self._rate, 8000))
+        if was:
+            self.toggle_play()
+
+    def toggle_play(self) -> None:
+        if self._want_play:
+            self._halt()
+            return
+        if not self.player.play(self._clip, self._rate, 0):
+            self.note.setText(why_no_sound())
+            return
+        self._want_play = True
+        self.play_btn.setText("Stop")
+        self._poll.start()
+
+    def _apply_live(self) -> None:
+        """Carry on from the same spot at the new speed."""
+        if not self._want_play:
+            return
+        pos = self.player.position() if self.player.playing else 0
+        if not self.player.play(self._clip, self._rate, pos):
+            self._halt()
+
+    def _tick(self) -> None:
+        if not self._want_play:
+            return
+        self.player.position()                       # lets the player notice it has reached the end
+        if not self.player.playing and not self._live.isActive():
+            if self.loop.isChecked() and self.player.play(self._clip, self._rate, 0):
+                return
+            self._halt()
+
+    def _halt(self) -> None:
+        self._want_play = False
+        self._live.stop()
+        self._poll.stop()
         self.player.stop()
-        self.chosen = self._rates[k]
+        self.player.rewind()
+        self.play_btn.setText("Play")
+
+    def _accept(self) -> None:
+        self._halt()
+        self.chosen = self._rate
+        self.track_only = self.scope_track.isChecked()
         self.accept()
 
-    def _shift(self, direction: int) -> None:
-        """Slide the three options down or up a ladder of well-separated speeds."""
-        self._timer.stop()
-        self.player.stop()
-        self._mark(-1)
-        ladder = LADDER
-        if direction < 0:
-            i = min(range(len(ladder)), key=lambda k: abs(ladder[k] - self._rates[0]))
-            if i == 0:
-                self.note.setText("These are already the slowest standard speeds. You can type any speed "
-                                  "into the Speed box in the main window.")
-                return
-            self._rates = ladder[max(0, i - 2): max(0, i - 2) + 3]
-        else:
-            j = min(range(len(ladder)), key=lambda k: abs(ladder[k] - self._rates[-1]))
-            if j == len(ladder) - 1:
-                self.note.setText("These are already the fastest standard speeds. You can type any speed "
-                                  "into the Speed box in the main window.")
-                return
-            j = min(j, len(ladder) - 3)
-            self._rates = ladder[j: j + 3]
-        self._fill()
-
     def done(self, result):
-        self._timer.stop()
-        self.player.stop()
+        self._halt()
         super().done(result)
 
 
@@ -379,8 +548,9 @@ hum, clicks, level) are off unless you tick them, and anything applied is record
     <td>The encoding is wrong. Pick the next entry in the Encoding list and play again. If every entry is
         noise, the chip probably holds a compressed format this version does not know, or it is not audio.</td></tr>
 <tr><td><b>Too fast and high, or too slow and low</b></td>
-    <td>The speed is wrong. Press <i>Check speed by ear</i>; <i>Play all three in turn</i> compares the likely
-        speeds in a few seconds.</td></tr>
+    <td>The speed is wrong. Press <i>Set speed by ear</i>, press Play, and drag the slider until it sounds
+        natural. The sound keeps playing while you change it. Click a standard speed to jump to it, use
+        -1% / +1% for fine steps, or type the exact speed if you know it.</td></tr>
 <tr><td><b>Right pitch, but stutters or repeats every moment</b></td>
     <td>The data is being read as two channels or as 16-bit when it is not, or the reverse. Try the
         matching entry in the Encoding list.</td></tr>

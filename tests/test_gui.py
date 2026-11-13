@@ -259,34 +259,94 @@ def test_export_dialog_options_reach_the_exporter(win, tmp_path):
     assert again.fmt.currentData() == "flac" and again.per_sound.isChecked() and again.cleanup().hum_hz == 60
 
 
-def test_speed_check_plays_all_three_in_turn(win):
-    from audiochip.gui.dialogs import ListeningCheck
+class FakePlayer:
+    """Stands in for the sound card: remembers what was asked for and where playback is."""
+    available = True
 
-    class FakePlayer:
-        available = True
+    def __init__(self):
+        self.played, self.playing, self.pos = [], False, 0
 
-        def __init__(self):
-            self.played = []
+    def play(self, x, rate, start=0):
+        self.played.append((len(x), rate, start))
+        self.playing = True
+        return True
 
-        def play(self, x, rate, start=0):
-            self.played.append((len(x), rate))
-            return True
+    def position(self):
+        return self.pos
 
-        def stop(self):
-            pass
+    def stop(self):
+        self.playing = False
+
+    def rewind(self):
+        self.pos = 0
+
+
+def test_speed_slider_reaches_any_speed_and_changes_it_live(win):
+    from audiochip.gui.dialogs import ListeningCheck, rate_to_slider, slider_to_rate
     p = FakePlayer()
-    d = ListeningCheck(win._audio, [8000, 11025, 16000], 11025, p, win, {8000: "voice pitch 120 Hz"})
-    assert "voice pitch 120 Hz" in d._rows[0][0].text() and "1." in d._rows[0][0].text()
-    d._play_all()
-    assert p.played[0][1] == 8000 and d._rows[0][1].text() == "Playing" and d._timer.isActive()
-    d._next_turn()
-    d._next_turn()
-    assert [r for _, r in p.played] == [8000, 11025, 16000]
-    d._next_turn()
-    assert d._turn == -1 and d._rows[2][1].text() == "Play"
-    d._play(1)
-    assert not d._timer.isActive() and p.played[-1] == (len(d._clip), 11025)
-    d.reject()
+    d = ListeningCheck(win._audio, [22050, 32000, 44100], 32000, p, win, {22050: "voice pitch 120 Hz"},
+                       pitch_period=180.0, content_frames=48000, track_name="Dialog", many_tracks=True)
+    assert d.rate == 32000 and d._preset_btns[32000].isChecked() and "*" in d._preset_btns[22050].text()
+    # the case that failed before: 24,000 Hz, offered neither by the estimate nor by its neighbours
+    d.slider.setValue(rate_to_slider(24100))
+    assert d.rate == 24000 and d._preset_btns[24000].isChecked() and d.spin.value() == 24000
+    assert "133 Hz" in d.info.text() and "0:02.0" in d.info.text() and "25.0% slower" in d.info.text()
+    d.snap.setChecked(False)
+    d.slider.setValue(rate_to_slider(24100))
+    assert abs(d.rate - 24100) <= 60 and not any(b.isChecked() for b in d._preset_btns.values())
+    for r in (3000, 7575, 24000, 64000):                       # the slider covers the whole range evenly
+        assert abs(slider_to_rate(rate_to_slider(r)) / r - 1) < 0.003
+    d._preset_btns[24000].click()
+    assert d.rate == 24000
+    # playing: a change of speed carries on from the same spot instead of starting again
+    d.toggle_play()
+    assert p.played[-1][1:] == (24000, 0) and d.play_btn.text() == "Stop"
+    p.pos = 5000
+    d._set_rate(d.rate * 1.01, snap=False)
+    assert d._live.isActive()
+    d._apply_live()
+    assert p.played[-1][1:] == (24240, 5000)
+    p.playing = False                                           # reached the end: Repeat starts it again
+    d._live.stop()
+    d._tick()
+    assert p.played[-1][1:] == (24240, 0) and d._want_play
+    d.loop.setChecked(False)
+    p.playing = False
+    d._tick()
+    assert not d._want_play and d.play_btn.text() == "Play"
+    # a known length gives the speed exactly
+    d.length.setText("0:02.5")
+    d._from_length()
+    assert d.rate == 19200
+    d.length.setText("nonsense")
+    d._from_length()
+    assert "minutes and seconds" in d.note.text() and d.rate == 19200
+    d.scope_track.setChecked(True)
+    d._accept()
+    assert d.chosen == 19200 and d.track_only
+
+
+def test_speed_set_by_ear_can_apply_to_one_track(win, monkeypatch):
+    from audiochip.gui import main_window as mw
+
+    class Canned:
+        def __init__(self, *a, **k):
+            self.kw = k
+            self.chosen, self.track_only = 24000, True
+
+        def exec(self):
+            return 1
+    monkeypatch.setattr(mw, "ListeningCheck", Canned)
+    track, _ = win.current()
+    other = next(t for t in win.coll.tracks if t is not track)
+    before = win.coll.rate
+    win.listening_check()
+    assert win.coll.rate_for(track) == 24000 and win.coll.rate_for(other) == before
+    assert "confirmed" in win.speed_chip.text() and not win.coll.rate_confirmed
+    assert win.check_btn.text() == "Set speed by ear"
+    Canned.exec = lambda self: (setattr(self, "track_only", False), 1)[1]
+    win.listening_check()
+    assert win.coll.rate == 24000 and win.coll.rate_confirmed and track.rate_override is None
 
 
 def test_version_notice_appears_only_for_a_newer_release(win):

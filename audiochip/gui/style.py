@@ -84,6 +84,11 @@ QPushButton[link="true"]:hover {{ text-decoration: underline; }}
 QComboBox, QLineEdit, QSpinBox {{ background: #12151A; border: 1px solid #3A4350; border-radius: 6px;
                                  padding: 5px 8px; color: {TEXT}; selection-background-color: {SELECT}; }}
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus {{ border-color: {ACCENT}; }}
+QSlider::groove:horizontal {{ height: 6px; background: #2A313B; border-radius: 3px; }}
+QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 3px; }}
+QSlider::handle:horizontal {{ background: #E6EAF0; width: 18px; margin: -7px 0; border-radius: 9px; }}
+QSlider::handle:horizontal:hover {{ background: #FFFFFF; }}
+QPushButton:checked {{ background: {ACCENT}; color: #FFFFFF; border-color: {ACCENT}; }}
 QComboBox:disabled, QLineEdit:disabled, QSpinBox:disabled {{ color: #5D6673; border-color: {BORDER}; }}
 QComboBox QAbstractItemView {{ background: {PANEL}; border: 1px solid {BORDER}; color: {TEXT};
                                selection-background-color: {SELECT}; selection-color: {TEXT}; outline: none; }}

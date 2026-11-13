@@ -1,4 +1,4 @@
-AUDIO CHIP DECODER 0.4.0
+AUDIO CHIP DECODER 0.4.1
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports audio files.
@@ -86,10 +86,14 @@ DECODE AND EXPORT
 - "Sounds in the selection" lists the separate sounds on the chip. Chips
   with their own index (NEC uPD7759, OKI MSM6295, LPC speech) are split
   exactly; others at silent gaps. Double-click a sound to play it.
-- "Check speed by ear": the speed is not stored on most chips, so the app
-  estimates it and you confirm. "Play all three in turn" (or keys 1, 2, 3)
-  compares the likely speeds in a few seconds. Formats that state their
-  own speed (uPD7759, LPC speech) need no check.
+- "Set speed by ear": the speed is not stored on most chips, so the app
+  estimates it and you set it. Press Play and drag the slider; the sound
+  keeps playing while the speed changes. Every standard speed (8,000 up to
+  48,000 Hz, including 24,000) is one click away, -1% / +1% make fine
+  steps, and an exact speed can be typed. If you know how long the sound
+  should last, typing that length sets the speed exactly. With several
+  boards open, a speed can be set for one track only. Formats that state
+  their own speed (uPD7759, LPC speech) need no check.
 - Sounds wrong? Help in the app lists fixes by symptom.
 - "Export audio" writes WAV, FLAC or MP3: one file per track, per chip
   and, if ticked, per separate sound, with a Report.txt and manifest.json
