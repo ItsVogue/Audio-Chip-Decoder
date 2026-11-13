@@ -204,16 +204,21 @@ HELP_HTML = """
 shows its best reading already applied, and tells you how sure it is. You confirm the speed by ear, then
 export WAV files.</p>
 <h4>Reading chips</h4>
+<p>Press <b>Read a chip</b> and pick your reader under <i>Read with</i>.</p>
 <table cellpadding="5">
-<tr><td><b>8-pin serial chips</b><br>25-series flash, 24-series and 25/95-series EEPROM, in DIP-8 or SOIC-8</td>
-    <td>Read inside the app with a CH341A programmer. Flash chips are identified automatically. EEPROMs carry
-        no ID, so you pick the type printed on the chip.</td></tr>
-<tr><td><b>Memory cards</b></td>
-    <td>Read inside the app through a USB card reader. Windows requires administrator rights for this.</td></tr>
-<tr><td><b>28- and 32-pin parallel chips</b><br>27C EPROM, 28F/29F/39SF flash</td>
-    <td>A CH341A has too few pins to read these; they need a universal programmer such as an XGecu T48.
-        This version does not drive that programmer itself. Dumps saved from it open with Open files and
-        decode the same way.</td></tr>
+<tr><td><b>XGecu T48, TL866II Plus, TL866A/CS</b></td>
+    <td>Reads 24- to 40-pin parallel EPROM and flash (27C, 28F, 29F, 39SF and similar) and serial chips.
+        Type what is printed on the chip and pick it from the list. The programmer's USB driver must be on
+        the PC; it comes with XGecu's Xgpro setup.</td></tr>
+<tr><td><b>CH341A programmer</b></td>
+    <td>Reads 8-pin serial chips in DIP-8 or SOIC-8. 25-series flash is identified automatically. 24-series
+        and 25/95-series EEPROMs carry no ID, so you pick the type printed on the chip. It cannot read
+        28- or 32-pin parallel chips.</td></tr>
+<tr><td><b>USB card reader</b></td>
+    <td>Reads a memory card's raw contents. Windows requires administrator rights for this.</td></tr>
+<tr><td><b>Other programmers</b><br>GQ-4X4, TOP, RT809H, Willem and similar</td>
+    <td>Cannot be driven by this app. Dumps saved from their own software open with Open files and decode
+        the same way.</td></tr>
 </table>
 <p>Only read commands are ever sent to a chip. The app cannot erase or write one.</p>
 <p><b>Pin 1</b> is marked with a dot or a notch on the chip; a clip's red wire goes to pin 1.

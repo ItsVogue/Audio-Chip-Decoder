@@ -168,8 +168,8 @@ class MainWindow(QMainWindow):
         self.tree.setHeaderLabels(["Track / chip", "Length", "Status"])
         self.tree.setRootIsDecorated(True)
         self.tree.setUniformRowHeights(True)
-        self.tree.setColumnWidth(0, 200)
-        self.tree.setColumnWidth(1, 64)
+        self.tree.setColumnWidth(0, 196)
+        self.tree.setColumnWidth(1, 62)
         self.tree.currentItemChanged.connect(lambda *_: self.refresh())
         ll.addWidget(self.tree, 1)
         row = QHBoxLayout()
@@ -284,6 +284,7 @@ class MainWindow(QMainWindow):
         grp = QButtonGroup(self)
         grp.addButton(self.scope_all)
         grp.addButton(self.scope_track)
+        grp.buttonClicked.connect(lambda *_: setattr(self, "_scope_auto", False))
         scope.addWidget(self.scope_all)
         scope.addWidget(self.scope_track)
         self.reset_btn = QPushButton("Back to automatic")
@@ -295,8 +296,8 @@ class MainWindow(QMainWindow):
         split.addWidget(mid)
         split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
-        split.setSizes([390, 700])
-        left.setMinimumWidth(360)
+        split.setSizes([420, 700])
+        left.setMinimumWidth(400)
         self.stack.addWidget(split)
 
     def _build_details(self):
@@ -637,8 +638,13 @@ class MainWindow(QMainWindow):
             self.rate_combo.setEditText(str(rate))
         self.confirm_box.setChecked(coll.rate_confirmed)
         has_override = bool(track.hyp_override or track.rate_override)
-        if has_override:
+        if has_override:                       # a track with its own setting: edits should stay with it
+            if not self.scope_track.isChecked():
+                self._scope_auto = True
             self.scope_track.setChecked(True)
+        elif getattr(self, "_scope_auto", False):
+            self._scope_auto = False
+            self.scope_all.setChecked(True)
         self.reset_btn.setEnabled(coll.hyp_source != "auto" or coll.rate_confirmed or has_override
                                   or any(t.hyp_override or t.rate_override for t in coll.tracks))
         self._updating = False
