@@ -15,7 +15,7 @@ if errorlevel 1 goto fail
 "%VPY%" -m PyInstaller --noconfirm --clean --windowed --name AudioChipDecoder ^
   --icon "%~dp0audiochip\gui\icon.ico" --add-data "%~dp0audiochip\gui\icon.ico;audiochip\gui" ^
   --add-data "%~dp0audiochip\readers\xgecu;audiochip\readers\xgecu" ^
-  --collect-all libusb_package --collect-all soundfile --hidden-import serial.tools.list_ports_windows ^
+  --collect-all libusb_package --collect-all soundfile --collect-all sounddevice --hidden-import serial.tools.list_ports_windows ^
   --paths "%~dp0." --distpath "%~dp0dist" --workpath "%TEMP%\audiochip_build" --specpath "%TEMP%\audiochip_build" ^
   "%~dp0tools\launch.py"
 if errorlevel 1 goto fail

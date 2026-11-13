@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase
-from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDockWidget, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QDockWidget, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
                                QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
                                QPushButton, QRadioButton, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTabWidget,
                                QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -20,6 +20,7 @@ from ..codecs import CODECS, LAYOUTS, Hypothesis, decode, frames_for_bytes, is_s
 from ..collection import Chip as ChipDump
 from ..collection import Collection, Track, build, chip_audio, measure_rates, move_chip, track_audio, track_sounds
 from ..export import ExportOptions, describe_reading, export
+from ..facts import selection_facts
 from ..rate import STANDARD_RATES
 from .dialogs import HELP_HTML, ExportDialog, ListeningCheck, TextDialog
 from .player import Player, why_no_sound
@@ -256,6 +257,40 @@ class MainWindow(QMainWindow):
         cl.addLayout(chips)
         cl.addWidget(self.notice)
         ml.addWidget(card)
+
+        about = self.about = QFrame()
+        about.setObjectName("card")
+        al = QVBoxLayout(about)
+        al.setContentsMargins(14, 10, 14, 10)
+        al.setSpacing(4)
+        head = QHBoxLayout()
+        self.about_cap = QLabel("ABOUT THIS FILE")
+        self.about_cap.setProperty("caption", True)
+        self.about_copy = QPushButton("Copy")
+        self.about_copy.setFlat(True)
+        self.about_copy.setProperty("link", True)
+        self.about_copy.setToolTip("Copy these facts as text, for notes or to send to someone.")
+        self.about_copy.clicked.connect(self._copy_about)
+        self.about_toggle = QPushButton("Hide")
+        self.about_toggle.setFlat(True)
+        self.about_toggle.setProperty("link", True)
+        self.about_toggle.clicked.connect(lambda: self._show_about(not self.about_body.isVisible()))
+        head.addWidget(self.about_cap)
+        head.addStretch(1)
+        head.addWidget(self.about_copy)
+        head.addWidget(self.about_toggle)
+        al.addLayout(head)
+        self.about_body = QWidget()
+        self.about_grid = QGridLayout(self.about_body)
+        self.about_grid.setContentsMargins(0, 0, 0, 0)
+        self.about_grid.setHorizontalSpacing(10)
+        self.about_grid.setVerticalSpacing(2)
+        for col in (1, 3, 5):
+            self.about_grid.setColumnStretch(col, 1)
+        al.addWidget(self.about_body)
+        self._about_rows: list[tuple[str, str, str]] = []
+        ml.addWidget(about)
+        self._show_about(self.settings.value("about_shown", "true") != "false")
 
         self.wave = WaveformView()
         self.wave.seek.connect(self._seek)
@@ -707,7 +742,50 @@ class MainWindow(QMainWindow):
         self.check_btn.style().polish(self.check_btn)
         self._update_pos(0)
         self._fill_sounds(track, chip, x)
+        self._fill_about(track, chip, x, rate, pad_from)
         self._refresh_details(track, chip)
+
+    # --------------------------------------------------------------------- about
+    def _fill_about(self, track: Track, chip: ChipDump | None, x, rate: int, pad_from) -> None:
+        try:
+            rows = selection_facts(self.coll, track, chip, x, rate, len(getattr(self, "_sounds", [])), pad_from)
+        except Exception as e:                          # facts are a convenience; never block the decode
+            self.log(f"Could not gather the facts for this selection: {e}")
+            rows = []
+        self._about_rows = rows
+        self.about_cap.setText("ABOUT THIS FILE" if chip is not None else "ABOUT THIS TRACK")
+        g = self.about_grid
+        while g.count():
+            w = g.takeAt(0).widget()
+            if w is not None:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+        per_col = max((len(rows) + 2) // 3, 1)             # three columns, filled top to bottom
+        room = max((self.about.width() or 960) // 3 - 130, 120)
+        for i, (label, value, tip) in enumerate(rows):
+            k = QLabel(label)
+            k.setProperty("muted", True)
+            v = QLabel()
+            v.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            v.setText(v.fontMetrics().elidedText(value, Qt.ElideRight, room))
+            full = f"{label}: {value}"
+            v.setToolTip(full + ("\n\n" + tip if tip else ""))
+            k.setToolTip(tip)
+            col = (i // per_col) * 2
+            g.addWidget(k, i % per_col, col)
+            g.addWidget(v, i % per_col, col + 1)
+
+    def _show_about(self, on: bool) -> None:
+        self.about_body.setVisible(on)
+        self.about_toggle.setText("Hide" if on else "Show")
+        self.settings.setValue("about_shown", "true" if on else "false")
+
+    def _copy_about(self) -> None:
+        text = "\n".join(f"{label}: {value}" for label, value, _ in self._about_rows)
+        head = self.sel_label.text() + "\n" + self.headline.text() + "\n"
+        QApplication.clipboard().setText(head + text)
+        self.statusBar().showMessage("Copied to the clipboard")
 
     # -------------------------------------------------------------------- sounds
     def _fill_sounds(self, track: Track, chip: ChipDump | None, x) -> None:
@@ -1001,7 +1079,7 @@ class MainWindow(QMainWindow):
         dlg = ListeningCheck(self._audio, est.top(3) if informed else [], current, self.player, self, reasons,
                              pitch_period=period, content_frames=pad_from or len(self._audio),
                              track_name=track.name, track_only=self.scope_track.isChecked(),
-                             many_tracks=len(coll.tracks) > 1)
+                             many_tracks=len(coll.tracks) > 1, settings=self.settings)
         if dlg.exec() and dlg.chosen:
             if dlg.track_only and len(coll.tracks) > 1:
                 track.rate_override = dlg.chosen if dlg.chosen != coll.rate or track.rate_stated else None

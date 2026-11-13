@@ -374,3 +374,129 @@ def test_read_dialog_adapts_to_each_serial_reader(app, tmp_path, monkeypatch):
         assert d.port.isVisible() is (kind == "serprog") and d.wiring.isVisible() is (kind in ("ft232h", "serprog"))
     d.open_after = []
     d.close()
+
+
+# ------------------------------------------------------------------ 0.4.2 screens
+class FakeLive:
+    """Stands in for the gapless stream player."""
+
+    def __init__(self, available=True):
+        self.available, self.error, self.loop, self.playing = available, "no sound output", True, False
+        self.calls = []
+
+    def start(self, x, rate, pos=0):
+        self.calls.append(("start", rate, pos))
+        self.playing = True
+        return True
+
+    def set_rate(self, rate):
+        self.calls.append(("rate", rate))
+
+    def stop(self):
+        self.playing = False
+
+    def close(self):
+        self.calls.append(("close",))
+
+
+def test_gap_checkbox_switches_between_stream_and_restart(win):
+    from audiochip.gui.dialogs import ListeningCheck
+    p, live = FakePlayer(), FakeLive()
+    d = ListeningCheck(win._audio, [], 32000, p, win, live=live, settings=win.settings)
+    assert d.smooth.isEnabled() and d.smooth.isChecked()
+    d.toggle_play()
+    assert live.calls == [("start", 32000, 0)] and not p.played
+    d._set_rate(24000, snap=False)
+    assert live.calls[-1] == ("rate", 24000) and not d._live.isActive() and not p.played   # no restart, no gap
+    d.loop.setChecked(False)
+    assert live.loop is False
+    d.smooth.setChecked(False)                       # with the gap: back to the basic player, still playing
+    assert p.played[-1][1:] == (24000, 0) and d._want_play and not d._streaming
+    p.pos = 700
+    d._set_rate(25000, snap=False)
+    d._apply_live()
+    assert p.played[-1][1:] == (25000, 700) and ("rate", 25000) not in live.calls
+    assert win.settings.value("speed_smooth") == "false"
+    d.reject()
+    assert live.calls[-1] == ("close",)
+    again = ListeningCheck(win._audio, [], 32000, FakePlayer(), win, live=FakeLive(), settings=win.settings)
+    assert not again.smooth.isChecked()
+    none = ListeningCheck(win._audio, [], 32000, FakePlayer(), win, live=FakeLive(False), settings=win.settings)
+    assert not none.smooth.isEnabled() and "no sound output" in none.smooth.toolTip()
+    win.settings.remove("speed_smooth")
+
+
+def test_stream_reads_the_clip_faster_or_slower_without_breaks():
+    import numpy as np
+    from audiochip.gui.player import render_block
+    x = (np.arange(1000) * 10).astype(np.int16).reshape(-1, 1)
+    half, pos, ended = render_block(x, 0.0, 0.5, 8, True)
+    assert np.allclose(half[:5, 0] * 32768, [0, 5, 10, 15, 20]) and pos == 4.0 and not ended
+    nxt, pos2, _ = render_block(x, pos, 2.0, 4, True)                  # speed changed: carries on from pos
+    assert np.allclose(nxt[:, 0] * 32768, [40, 60, 80, 100]) and pos2 == 12.0
+    tail, _, ended = render_block(x, 990.0, 2.0, 8, False)
+    assert ended and np.allclose(tail[5:, 0], 0)
+    wrap, pos3, ended = render_block(x, 996.0, 1.0, 8, True)
+    assert not ended and pos3 == 4.0 and np.allclose(wrap[4:, 0] * 32768, [0, 10, 20, 30])
+
+
+def test_about_box_describes_a_chip_and_a_track(win):
+    track, _ = win.current()
+    labels = {r[0]: r[1] for r in win._about_rows}
+    assert win.about_cap.text() == "ABOUT THIS TRACK"
+    assert labels["Chips"].startswith("3 in use") and "60,000" in labels["Size"] and "Filler" in labels
+    assert "samples" in labels["Length"] and "kbit per second" in labels["Storage"]
+    assert "%" in labels["Loudest peak"] and "dB" in labels["Average level"] and "kHz" in labels["Frequencies"]
+    item = win.tree.topLevelItem(0).child(0)
+    win.tree.setCurrentItem(item)
+    labels = {r[0]: r[1] for r in win._about_rows}
+    assert win.about_cap.text() == "ABOUT THIS FILE" and labels["File"] == "1.bin"
+    assert "chip 1 of 3" in labels["Role"] and labels["Fingerprint"].endswith("...") and "Sound data" in labels
+    assert win.about_grid.count() == 2 * len(win._about_rows)
+    win._copy_about()
+    from PySide6.QtWidgets import QApplication
+    assert "Fingerprint:" in QApplication.clipboard().text()
+
+
+def test_chip_markings_and_packages_in_the_read_dialog(app, tmp_path, monkeypatch):
+    from audiochip.gui.read_dialog import ReadDialog
+    from audiochip.readers import xgecu
+    from audiochip.readers.chips import chip_from_marking
+    want = {"24C256": ("i2c_eeprom", 32768), "AT24C02": ("i2c_eeprom", 256), "M24M01": ("i2c_eeprom", 131072),
+            "BR24T08": ("i2c_eeprom", 1024), "25LC256": ("spi_eeprom", 32768), "M95160": ("spi_eeprom", 2048),
+            "W25Q64FV": ("spi_flash", 8 << 20), "MX25L1606E": ("spi_flash", 2 << 20), "25Q32": ("spi_flash", 4 << 20),
+            "SST25VF040B": ("spi_flash", 512 << 10), "AT45DB041D": ("at45", 2048 * 264)}
+    for text, (family, size) in want.items():
+        chip, _ = chip_from_marking(text)
+        assert chip is not None and (chip.family, chip.size) == (family, size), text
+    assert chip_from_marking("93C46")[0] is None and "93-series" in chip_from_marking("93C46")[1]
+    assert chip_from_marking("27C256")[0] is None
+
+    assert xgecu.package_of("W25Q32BV@SOIC8") == "soic" and xgecu.package_of("27C256") == "dip"
+    assert xgecu.package_of("AM29F040@PLCC32") == "plcc" and xgecu.package_of("X@TSOP48") == "tsop"
+    soic = xgecu.search("ii", "24C256", package="soic")
+    assert soic and all("@SO" in n.upper() for n, _, _ in soic)
+
+    f = tmp_path / "chip.bin"
+    f.write_bytes(bytes(range(256)) * 256)
+    monkeypatch.setenv("AUDIOCHIP_SIM", str(f))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    d = ReadDialog(QSettings("AudioChipDecoder", "AudioChipDecoder"))
+    d.show()
+    d.source.setCurrentIndex(d.source.findData("ch341a"))
+    assert "SOIC-8" in d.source.currentText()
+    d.marking.setText("24LC512")
+    assert d.family.currentData() == "i2c_eeprom" and d._chosen_chip().size == 65536 and "64 KB" in d.hint.text()
+    d.marking.setText("25LC256")
+    assert d.family.currentData() == "spi_eeprom" and d._chosen_chip().size == 32768
+    d.marking.setText("AT45DB041D")
+    assert d._chosen_chip().family == "at45"
+    d.source.setCurrentIndex(d.source.findData("ft232h"))
+    d.marking.setText("24C02")
+    assert "SPI chips only" in d.hint.text()
+    d.source.setCurrentIndex(d.source.findData("xgecu"))
+    d.x_package.setCurrentIndex(d.x_package.findData("soic"))
+    d.x_search.setText("25Q32")
+    assert d.x_list.count() and all("SO" in d.x_list.item(i).text() for i in range(d.x_list.count()))
+    d.open_after = []
+    d.close()

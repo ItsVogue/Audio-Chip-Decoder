@@ -1,4 +1,4 @@
-AUDIO CHIP DECODER 0.4.1
+AUDIO CHIP DECODER 0.4.2
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports audio files.
@@ -39,7 +39,9 @@ Press "Read a chip" and pick your reader in "Read with":
 XGecu T48, TL866II Plus, TL866A/CS  (the usual reader for old sound chips)
    Reads 24/28/32/40-pin parallel EPROMs and flash (27C, 28F, 29F, 39SF...)
    and serial chips. Type what is printed on the chip, for example 27C256;
-   the list narrows to matching types out of about 18,000. Press Read chip.
+   the list narrows to matching types out of about 18,000. Pick the package
+   (DIP, SOIC, PLCC, TSOP) to see only that shape; SOIC, PLCC and TSOP
+   chips sit in an adapter board in the socket. Press Read chip.
    - The programmer's USB driver must be on the PC. It comes with XGecu's
      Xgpro setup and only needs installing once. Xgpro itself is not used.
    - No ID request is made unless you tick the box: on EPROMs that request
@@ -49,8 +51,11 @@ XGecu T48, TL866II Plus, TL866A/CS  (the usual reader for old sound chips)
 CH341A programmer  (8-pin serial chips)
    If its driver is missing, "Install the driver" downloads WCH's own
    driver and starts it; press INSTALL in WCH's window, replug. Once per PC.
+   For chips in SOIC-8 (with the clip) or DIP-8 (in the socket). SOIC-8 is
+   the shape of the body; the part number printed on it says what is inside.
    "Detect chip" identifies 25-series flash and AT45DB DataFlash. 24-series
-   and 25/95-series EEPROMs carry no ID: pick the type printed on the chip.
+   and 25/95-series EEPROMs carry no ID: type what is printed on the chip
+   (24C256, 25LC512, M95160...) and the type and size are set for you.
    If the programmer has the generic WinUSB driver instead (installed by
    Zadig for other tools), the app uses that: slower, SPI chips only.
 
@@ -92,8 +97,14 @@ DECODE AND EXPORT
   48,000 Hz, including 24,000) is one click away, -1% / +1% make fine
   steps, and an exact speed can be typed. If you know how long the sound
   should last, typing that length sets the speed exactly. With several
-  boards open, a speed can be set for one track only. Formats that state
-  their own speed (uPD7759, LPC speech) need no check.
+  boards open, a speed can be set for one track only. "Change speed
+  without a gap" keeps the sound unbroken while you drag; untick it to use
+  Windows' basic player instead (a short gap at each change). Formats that
+  state their own speed (uPD7759, LPC speech) need no check.
+- "About this file" (or track) under the headline lists the facts: size,
+  the chip types that size points to, sound data and filler, length,
+  storage rate, loudest peak, average level, frequency range, fingerprint.
+  Hover a line for what it means; Copy puts them on the clipboard.
 - Sounds wrong? Help in the app lists fixes by symptom.
 - "Export audio" writes WAV, FLAC or MP3: one file per track, per chip
   and, if ticked, per separate sound, with a Report.txt and manifest.json

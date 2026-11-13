@@ -16,8 +16,8 @@ from ..readers import Cancelled, DriverMissing, NoDevice, ReaderError, cards, xg
 from ..readers.base import read_verified
 from ..readers.ch341a import SPI_ONLY, install_driver, open_reader
 from ..readers.serprog import list_ports
-from ..readers.chips import (I2C_TYPES, SPI_EEPROM_TYPES, SPI_FLASH_SIZES, ChipInfo, human_size, i2c_chip,
-                             spi_eeprom_chip, spi_flash_chip)
+from ..readers.chips import (I2C_TYPES, SPI_EEPROM_TYPES, SPI_FLASH_SIZES, ChipInfo, chip_from_marking,
+                             human_size, i2c_chip, spi_eeprom_chip, spi_flash_chip)
 from ..structure import analyse_structure
 from .widgets import Chip
 from .worker import Worker
@@ -89,10 +89,10 @@ class ReadDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(QLabel("<b>Read with</b>"))
         self.source = QComboBox()
-        self.source.addItem("CH341A programmer  -  8-pin serial chips (24, 25, 95 series, AT45)", "ch341a")
+        self.source.addItem("CH341A programmer  -  8-pin serial chips in SOIC-8 or DIP-8 (24, 25, 95 series, AT45)", "ch341a")
         self.source.addItem("XGecu T48 / TL866II Plus / TL866A/CS  -  parallel EPROM and flash, and serial chips",
                             "xgecu")
-        self.source.addItem("CH347 adapter  -  8-pin serial chips (24, 25, 95 series, AT45)", "ch347")
+        self.source.addItem("CH347 adapter  -  8-pin serial chips in SOIC-8 or DIP-8 (24, 25, 95 series, AT45)", "ch347")
         self.source.addItem("FT232H / FT2232H board  -  SPI chips (25, 95 series, AT45), wired by hand", "ft232h")
         self.source.addItem("Raspberry Pi Pico or Arduino with serprog firmware  -  SPI chips", "serprog")
         self.source.addItem("USB card reader  -  memory cards and USB drives", "card")
@@ -166,23 +166,30 @@ class ReadDialog(QDialog):
         r.addWidget(self.family)
         r.addWidget(self.variant)
         r.addStretch(1)
-        g.addLayout(r, 3, 1)
+        g.addLayout(r, 4, 1)
+        self.marking = QLineEdit()
+        self.marking.setPlaceholderText("Or type what is printed on the chip, for example 24C256, 25LC512, W25Q64")
+        self.marking.setClearButtonEnabled(True)
+        self.marking.setToolTip("SOIC-8 and DIP-8 are package shapes, not chip types. The part number printed on "
+                                "the chip says what is inside; type it here and the type and size are set for you.")
+        self.marking.textChanged.connect(self._marking_changed)
+        g.addWidget(self.marking, 3, 1)
         self.hint = QLabel()
         self.hint.setWordWrap(True)
         self.hint.setProperty("muted", True)
         self.hint.setMinimumHeight(54)
         self.hint.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        g.addWidget(self.hint, 4, 1)
+        g.addWidget(self.hint, 5, 1)
         self.wiring = QLabel()
         self.wiring.setWordWrap(True)
         self.wiring.setProperty("muted", True)
         self.wiring.setTextFormat(Qt.RichText)
-        g.addWidget(self.wiring, 6, 1)
+        g.addWidget(self.wiring, 7, 1)
         volt = self.volt = QLabel(VOLTAGE_NOTE["ch341a"])
         volt.setWordWrap(True)
         volt.setProperty("warning", True)
         volt.setMinimumHeight(58)
-        g.addWidget(volt, 5, 1)
+        g.addWidget(volt, 6, 1)
         g.setColumnStretch(1, 1)
         self.pages.addWidget(chip_page)
 
@@ -213,7 +220,18 @@ class ReadDialog(QDialog):
         self.x_search.setPlaceholderText("Type what is printed on the chip, for example 27C256 or AM29F040")
         self.x_search.setClearButtonEnabled(True)
         self.x_search.textChanged.connect(self._x_search_changed)
-        x.addWidget(self.x_search, 2, 1)
+        self.x_package = QComboBox()
+        self.x_package.addItem("Any package", "")
+        for key, label in xgecu.PACKAGES.items():
+            self.x_package.addItem(label, key)
+        self.x_package.setToolTip("The shape of the chip's body. DIP chips go straight into the socket; SOIC, "
+                                  "PLCC and TSOP chips sit in an adapter board that goes into the socket.")
+        self.x_package.currentIndexChanged.connect(self._x_search_changed)
+        xr = QHBoxLayout()
+        xr.setSpacing(8)
+        xr.addWidget(self.x_search, 1)
+        xr.addWidget(self.x_package)
+        x.addLayout(xr, 2, 1)
         self.x_list = QListWidget()
         self.x_list.setFixedHeight(138)
         self.x_list.setUniformItemSizes(True)
@@ -537,12 +555,13 @@ class ReadDialog(QDialog):
         text = self.x_search.text().strip()
         self.x_list.clear()
         if len(text) < 2:
-            self.x_count.setText("Type at least two characters. Add the package to narrow it, for example "
-                                 "\"27C020 DIP\". Any maker's entry for the same part number reads the same way.")
+            self.x_count.setText("Type at least two characters, and pick the package on the right (DIP, SOIC, "
+                                 "PLCC...). Any maker's entry for the same part number reads the same way.")
             return
-        hits = xgecu.search(self._x_family or "ii", text)
+        hits = xgecu.search(self._x_family or "ii", text, package=self.x_package.currentData() or None)
         for name, size, has_id in hits:
-            item = QListWidgetItem(f"{name}    -    {human_size(size)}")
+            item = QListWidgetItem(f"{name.split('@')[0]}    -    {xgecu.package_label(name)}    -    "
+                                   f"{human_size(size)}")
             item.setData(Qt.UserRole, (name, size, has_id))
             self.x_list.addItem(item)
         if hits:
@@ -603,6 +622,34 @@ class ReadDialog(QDialog):
             self.variant.setCurrentIndex(8)
         self.hint.setText(FAMILY_HINT[fam])
 
+    def _marking_changed(self) -> None:
+        chip, message = chip_from_marking(self.marking.text())
+        self._marked = None
+        if not message:
+            self.hint.setText(FAMILY_HINT[self.family.currentData()])
+            return
+        if chip is not None:
+            fam = "spi_flash" if chip.family == "at45" else chip.family
+            row = self.family.findData(fam)
+            if row < 0:
+                self.hint.setText(message + " This reader handles SPI chips only; use a CH341A, CH347 or XGecu "
+                                  "programmer for 24-series chips.")
+                return
+            self.family.setCurrentIndex(row)
+            self._family_changed()
+            if chip.family == "at45":
+                self._marked = chip
+                self.variant.insertItem(0, f"{human_size(chip.size)} AT45 DataFlash (from the marking)", chip.size)
+                self.variant.setCurrentIndex(0)
+            else:
+                key = chip.size if fam == "spi_flash" else chip.i2c_type if fam == "i2c_eeprom" else \
+                    next(i for i, (_n, sz, _a) in enumerate(SPI_EEPROM_TYPES) if sz == chip.size)
+                at = self.variant.findData(key)
+                if at >= 0:
+                    self.variant.setCurrentIndex(at)
+            message = "<b>" + message + "</b> Type and size are set."
+        self.hint.setText(message)
+
     def _detect(self) -> None:
         def job(_prog):
             with self._open() as r:
@@ -632,6 +679,9 @@ class ReadDialog(QDialog):
         if fam == "spi_flash" and self._detected and self._detected.family == "at45" \
                 and self.variant.currentIndex() == 0:
             return self._detected
+        if fam == "spi_flash" and getattr(self, "_marked", None) and self.variant.currentIndex() == 0 \
+                and "AT45" in self.variant.currentText():
+            return self._marked
         if fam == "spi_flash":
             chip = spi_flash_chip(int(self.variant.currentData()))
             if self._detected and self._detected.size == chip.size:

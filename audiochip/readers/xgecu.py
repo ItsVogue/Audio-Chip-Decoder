@@ -103,7 +103,36 @@ def chip_count(family: str) -> int:
     return len(_index().get(family, []))
 
 
-def search(family: str, text: str, limit: int = 250) -> list[tuple[str, int, bool]]:
+PACKAGES = {
+    "dip": "DIP (through-hole, fits the socket directly)",
+    "soic": "SOIC / SOP (surface-mount, 8 to 44 pins; needs an adapter)",
+    "plcc": "PLCC (square, pins on four sides; needs an adapter)",
+    "tsop": "TSOP / TSSOP / SSOP (thin surface-mount; needs an adapter)",
+    "other": "Other (BGA, WSON, DFN and similar)",
+}
+
+
+def package_of(name: str) -> str:
+    """Package family of a chip-list entry. Entries without a package suffix are DIP."""
+    if "@" not in name:
+        return "dip"
+    p = name.split("@", 1)[1].upper()
+    if p.startswith("DIP"):
+        return "dip"
+    if p.startswith(("TSOP", "TSSOP", "SSOP", "VSOP", "MSOP", "WSOP")):
+        return "tsop"
+    if p.startswith(("SOIC", "SOP", "PSOP", "MFP", "SO")):
+        return "soic"
+    if p.startswith("PLCC"):
+        return "plcc"
+    return "other"
+
+
+def package_label(name: str) -> str:
+    return name.split("@", 1)[1] if "@" in name else "DIP"
+
+
+def search(family: str, text: str, limit: int = 250, package: str | None = None) -> list[tuple[str, int, bool]]:
     """Memory chips whose name contains every word typed. Returns (name, bytes, has ID)."""
     words = [w for w in re.split(r"[\s,]+", text.upper()) if w]
     if not words:
@@ -111,10 +140,12 @@ def search(family: str, text: str, limit: int = 250) -> list[tuple[str, int, boo
     hits = []
     for name, size, _pins, has_id in _index().get(family, []):
         up = name.upper()
+        if package and package_of(name) != package:
+            continue
         if all(w in up for w in words):
             base = up.split("@")[0]
             rank = (0 if base == words[0] else 1 if base.startswith(words[0]) else 2 if up.startswith(words[0])
-                    else 3, 0 if "@" not in up or "@DIP" in up else 1, len(name), name)
+                    else 3, 0 if package or "@" not in up or "@DIP" in up else 1, len(name), name)
             hits.append((rank, name, size, bool(has_id)))
     hits.sort()
     return [(n, s, i) for _, n, s, i in hits[:limit]]

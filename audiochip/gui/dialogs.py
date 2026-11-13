@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 from ..cleanup import Cleanup
 from ..export import FORMATS
 
-from .player import Player, why_no_sound
+from .player import LivePlayer, Player, why_no_sound
 
 CLIP_SECONDS = 8
 
@@ -69,7 +69,7 @@ class ListeningCheck(QDialog):
     def __init__(self, audio: np.ndarray, rates: list[int], current: int, player: Player, parent=None,
                  reasons: dict[int, str] | None = None, pitch_period: float = 0.0,
                  content_frames: int | None = None, track_name: str = "", track_only: bool = False,
-                 many_tracks: bool = False):
+                 many_tracks: bool = False, live=None, settings=None):
         super().__init__(parent)
         self.setWindowTitle("Set the speed by ear")
         self.setMinimumWidth(720)
@@ -85,6 +85,9 @@ class ListeningCheck(QDialog):
         self._start_rate = self._rate
         self._want_play = False
         self._setting = False
+        self._settings = settings
+        self.stream = live if live is not None else LivePlayer()      # changes speed without a gap
+        self._streaming = False
         self._live = QTimer(self)                 # waits for the slider to settle before restarting the sound
         self._live.setSingleShot(True)
         self._live.setInterval(90)
@@ -203,8 +206,23 @@ class ListeningCheck(QDialog):
         self.clip_box.addItem("Play the busiest 8 seconds", "clip")
         self.clip_box.addItem("Play the whole selection", "all")
         self.clip_box.currentIndexChanged.connect(self._clip_changed)
+        self.smooth = QCheckBox("Change speed without a gap")
+        self.smooth.setToolTip("On: the sound carries on unbroken while the speed changes.\n"
+                               "Off: the sound restarts from the same spot each time the speed changes, with a "
+                               "short gap, using Windows' basic player. Try Off if the sound crackles or is silent.")
+        if self.stream.available:
+            on = settings.value("speed_smooth", "true") != "false" if settings is not None else True
+            self.smooth.setChecked(on)
+        else:
+            self.smooth.setChecked(False)
+            self.smooth.setEnabled(False)
+            self.smooth.setToolTip("Not available on this PC: " + (self.stream.error or "no sound output found")
+                                   + ". The sound restarts with a short gap when the speed changes.")
+        self.smooth.toggled.connect(self._smooth_toggled)
+        self.loop.toggled.connect(lambda on: setattr(self.stream, "loop", on))
         opts.addWidget(self.clip_box)
         opts.addWidget(self.loop)
+        opts.addWidget(self.smooth)
         opts.addStretch(1)
         lay.addLayout(opts)
 
@@ -282,7 +300,10 @@ class ListeningCheck(QDialog):
             b.setChecked(r == rate)
         self._describe()
         if changed and self._want_play:
-            self._live.start()
+            if self._streaming:
+                self.stream.set_rate(rate)             # takes effect at once; nothing restarts
+            else:
+                self._live.start()
 
     def _describe(self) -> None:
         rate = self._rate
@@ -326,7 +347,14 @@ class ListeningCheck(QDialog):
         if self._want_play:
             self._halt()
             return
-        if not self.player.play(self._clip, self._rate, 0):
+        self._streaming = False
+        if self.smooth.isChecked() and self.stream.available:
+            self.stream.loop = self.loop.isChecked()
+            self._streaming = self.stream.start(self._clip, self._rate, 0)
+            if not self._streaming:
+                self.note.setText("Gapless playback could not start (" + (self.stream.error or "unknown reason")
+                                  + "). Using the basic player instead.")
+        if not self._streaming and not self.player.play(self._clip, self._rate, 0):
             self.note.setText(why_no_sound())
             return
         self._want_play = True
@@ -335,7 +363,7 @@ class ListeningCheck(QDialog):
 
     def _apply_live(self) -> None:
         """Carry on from the same spot at the new speed."""
-        if not self._want_play:
+        if not self._want_play or self._streaming:
             return
         pos = self.player.position() if self.player.playing else 0
         if not self.player.play(self._clip, self._rate, pos):
@@ -343,6 +371,10 @@ class ListeningCheck(QDialog):
 
     def _tick(self) -> None:
         if not self._want_play:
+            return
+        if self._streaming:
+            if not self.stream.playing:              # reached the end with Repeat off
+                self._halt()
             return
         self.player.position()                       # lets the player notice it has reached the end
         if not self.player.playing and not self._live.isActive():
@@ -354,9 +386,18 @@ class ListeningCheck(QDialog):
         self._want_play = False
         self._live.stop()
         self._poll.stop()
+        self.stream.stop()
+        self._streaming = False
         self.player.stop()
         self.player.rewind()
         self.play_btn.setText("Play")
+
+    def _smooth_toggled(self, on: bool) -> None:
+        if self._settings is not None:
+            self._settings.setValue("speed_smooth", "true" if on else "false")
+        if self._want_play:                          # carry on in the other mode
+            self._halt()
+            self.toggle_play()
 
     def _accept(self) -> None:
         self._halt()
@@ -366,6 +407,7 @@ class ListeningCheck(QDialog):
 
     def done(self, result):
         self._halt()
+        self.stream.close()
         super().done(result)
 
 
@@ -535,6 +577,9 @@ export audio files. You can also drop files or folders onto the window, or reope
 <p><b>Pin 1</b> is marked with a dot or a notch on the chip; a clip's red wire goes to pin 1.
 <b>All FF or all 00</b> means the chip is blank, backwards or not making contact.
 <b>Reads that differ</b> mean a poor contact: reseat the chip or clip, or take the chip off its board.</p>
+<p><b>SOIC-8, DIP-8, PLCC, TSOP</b> are package shapes, not chip types. For 8-pin chips, type the part
+number printed on the chip into the box on the Read screen and the type and size are set. For an XGecu
+programmer, pick the package next to the search box to list only chips of that shape.</p>
 <h4>Separate sounds</h4>
 <p>Voice chips usually hold many short clips. The <b>Sounds</b> tab lists them for the selected track or
 chip: double-click one to play it. Chips with their own index (NEC uPD7759, OKI MSM6295, LPC speech) are
@@ -549,7 +594,8 @@ hum, clicks, level) are off unless you tick them, and anything applied is record
         noise, the chip probably holds a compressed format this version does not know, or it is not audio.</td></tr>
 <tr><td><b>Too fast and high, or too slow and low</b></td>
     <td>The speed is wrong. Press <i>Set speed by ear</i>, press Play, and drag the slider until it sounds
-        natural. The sound keeps playing while you change it. Click a standard speed to jump to it, use
+        natural. The sound keeps playing while you change it; untick <i>Change speed without a gap</i> if it
+        crackles. Click a standard speed to jump to it, use
         -1% / +1% for fine steps, or type the exact speed if you know it.</td></tr>
 <tr><td><b>Right pitch, but stutters or repeats every moment</b></td>
     <td>The data is being read as two channels or as 16-bit when it is not, or the reverse. Try the

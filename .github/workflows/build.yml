@@ -67,6 +67,7 @@ jobs:
           --add-data "audiochip/readers/xgecu;audiochip/readers/xgecu"
           --collect-all libusb_package
           --collect-all soundfile
+          --collect-all sounddevice
           --hidden-import serial.tools.list_ports_windows
           --paths . tools/launch.py
 

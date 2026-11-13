@@ -62,6 +62,11 @@ def selftest(argv: list[str]) -> int:
             raise RuntimeError("libusb did not load")
         return f"libusb loaded, CH341A present: {usb.core.find(idVendor=0x1A86, idProduct=0x5512, backend=backend) is not None}"
 
+    def live_audio():
+        import sounddevice as sd
+        outputs = [d for d in sd.query_devices() if d.get("max_output_channels", 0) > 0]
+        return f"PortAudio loaded ({sd.get_portaudio_version()[1]}), {len(outputs)} sound output(s)"
+
     def serial_ports():
         from ..readers.serprog import list_ports
         return f"{len(list_ports())} serial port(s)"
@@ -84,7 +89,7 @@ def selftest(argv: list[str]) -> int:
         return f"{len(hits)} chips match 27C256; {state}"
 
     for name, fn in (("window", window), ("decode", decode), ("flac and mp3", flac_mp3), ("usb", usb),
-                     ("serial ports", serial_ports), ("xgecu helper", minipro)):
+                     ("gapless audio", live_audio), ("serial ports", serial_ports), ("xgecu helper", minipro)):
         step(name, fn)
     try:
         with open(report, "w", encoding="utf-8") as f:
