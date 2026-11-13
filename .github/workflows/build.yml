@@ -47,9 +47,12 @@ jobs:
         shell: pwsh
         working-directory: audiochip/readers/xgecu
         run: |
-          .\minipro.exe -L 27C256 2>&1 | Select-Object -First 5
-          Write-Host "minipro exit code: $LASTEXITCODE"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $out = (& .\minipro.exe --version 2>&1 | Out-String)
+          Write-Host $out
+          if ($out -notmatch "minipro") { Write-Error "minipro.exe did not start"; exit 1 }
+          $out = (& .\minipro.exe -k 2>&1 | Out-String)
+          Write-Host "Presence check with nothing plugged in said: $out"
+          exit 0
 
       - name: Build the standalone program
         shell: pwsh

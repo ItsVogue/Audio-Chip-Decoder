@@ -1,14 +1,20 @@
 AUDIO CHIP DECODER 0.4.0
 ========================
 
-Reads a memory chip, finds the audio stored on it, and exports WAV files.
+Reads a memory chip, finds the audio stored on it, and exports audio files.
 One program: it reads the chip, works out how the sound is stored, shows
-its best reading already applied, lets you confirm the speed by ear, and
-writes the WAV files with a report.
+its best reading already applied, splits it into its separate sounds, lets
+you confirm the speed by ear, and writes the files with a report.
 
 
 INSTALL
 -------
+Easiest: download AudioChipDecoder-Setup-x.y.z.exe from the Releases page
+of the project on GitHub and run it. One file, no Python needed, installs
+for your user only. Windows SmartScreen may warn because the installer is
+not code-signed: choose "More info", then "Run anyway".
+
+From this folder instead:
 1. Unzip the whole download into a folder.
 2. Double-click  Install.bat
    - If Windows shows a security prompt, choose "More info" then
@@ -16,11 +22,14 @@ INSTALL
    - No administrator rights needed. Installs for your user only, into
      %LOCALAPPDATA%\AudioChipDecoder
    - Needs internet the first time: it fetches Python if you do not have
-     it, plus NumPy and Qt. About 150 MB.
+     it, plus the libraries the app uses. About 160 MB.
 3. Start "Audio Chip Decoder" from the desktop or the Start menu.
 
 Remove it with  Uninstall.bat .  Build-Exe.bat (after installing) makes a
 standalone folder, dist\AudioChipDecoder, for a PC with no internet.
+
+Once a day the app asks GitHub whether a newer release exists and shows a
+button if so. Only version numbers are compared; nothing else is sent.
 
 
 READ A CHIP
@@ -40,10 +49,24 @@ XGecu T48, TL866II Plus, TL866A/CS  (the usual reader for old sound chips)
 CH341A programmer  (8-pin serial chips)
    If its driver is missing, "Install the driver" downloads WCH's own
    driver and starts it; press INSTALL in WCH's window, replug. Once per PC.
-   "Detect chip" identifies 25-series flash. 24-series and 25/95-series
-   EEPROMs carry no ID: pick the type printed on the chip.
+   "Detect chip" identifies 25-series flash and AT45DB DataFlash. 24-series
+   and 25/95-series EEPROMs carry no ID: pick the type printed on the chip.
+   If the programmer has the generic WinUSB driver instead (installed by
+   Zadig for other tools), the app uses that: slower, SPI chips only.
 
-Either way it reads twice and compares, reads a third time if they differ,
+CH347 adapter  (8-pin serial chips, faster)
+   Same driver and same steps as the CH341A. Its mode jumper must select
+   SPI/I2C.
+
+FT232H / FT2232H / FT4232H board  (SPI chips, wired by hand)
+   Port A: AD0 clock, AD1 to the chip, AD2 from the chip, AD3 chip select.
+   Uses FTDI's driver, which Windows normally installs by itself.
+
+Raspberry Pi Pico or Arduino running serprog firmware  (SPI chips)
+   Pick the board's COM port. pico-serprog and frser-duino are the usual
+   firmwares.
+
+Every reader reads twice and compares, reads a third time if they differ,
 and refuses to save a blank or unreliable read. For a sound spread over
 several chips, keep the same Track name and read them in order. Then press
 "Decode what was read".
@@ -60,18 +83,29 @@ DECODE AND EXPORT
 -----------------
 - The headline states the encoding and speed in force, with a confidence
   level for the encoding. Press Play.
-- "Check speed by ear": the speed is never stored on a chip, so the app
-  estimates it and you confirm. Pick the option that sounds natural.
+- "Sounds in the selection" lists the separate sounds on the chip. Chips
+  with their own index (NEC uPD7759, OKI MSM6295, LPC speech) are split
+  exactly; others at silent gaps. Double-click a sound to play it.
+- "Check speed by ear": the speed is not stored on most chips, so the app
+  estimates it and you confirm. "Play all three in turn" (or keys 1, 2, 3)
+  compares the likely speeds in a few seconds. Formats that state their
+  own speed (uPD7759, LPC speech) need no check.
 - Sounds wrong? Help in the app lists fixes by symptom.
-- "Export WAV" writes one WAV per track and per chip, a Report.txt and a
-  manifest.json with every setting and a fingerprint of every file.
+- "Export audio" writes WAV, FLAC or MP3: one file per track, per chip
+  and, if ticked, per separate sound, with a Report.txt and manifest.json
+  recording every setting and a fingerprint of every file. Optional
+  clean-up (offset and rumble, mains hum, clicks, level) is off unless you
+  tick it; the plain export is the chip's exact output.
 - "Details" shows why the reading was chosen, every candidate and its
   score, fingerprints, padding, the decode formula with a worked example,
   a hex view and a session log.
 - "Device profiles" saves a confirmed encoding and speed under a name.
 
 You can also open dump files you already have (.bin, Intel HEX, Motorola
-S-record), or drag them onto the window.
+S-record), drag them onto the window, or reopen them from "Recent".
+
+Command line:  python -m audiochip convert <folder> -o <out>
+               [--format wav|flac|mp3] [--sounds] [--clean offset,level,...]
 
 
 WHAT IT COVERS
@@ -79,29 +113,41 @@ WHAT IT COVERS
 Reads directly:  Through an XGecu T48, TL866II Plus or TL866A/CS: parallel
                    EPROM, EEPROM and flash, and serial chips, from the
                    programmer's own list of about 18,000 memory types.
-                 Through a CH341A: 25-series SPI flash (identified
-                   automatically), 24-series I2C EEPROM, 25/95-series SPI
-                   EEPROM.
+                 Through a CH341A or CH347: 25-series SPI flash and AT45DB
+                   DataFlash (identified automatically), 24-series I2C
+                   EEPROM, 25/95-series SPI EEPROM.
+                 Through an FT232H board or a serprog board: the SPI chips
+                   above (no I2C).
                  Memory cards and USB drives, first 16, 64 or 256 MB.
 Decodes:         8-bit unsigned, signed, sign-and-magnitude
                  8-bit mu-law and A-law, standard and inverted storage
                  16-bit signed and unsigned, either byte order
-                 4-bit OKI ADPCM, either nibble order
+                 4-bit ADPCM: OKI, IMA and Yamaha, either nibble order
+                 1-bit CVSD delta modulation (HC55516, MC3417), either
+                   bit order
+                 NEC uPD7759 voice ROMs (index, blocks and speed)
+                 OKI MSM6295 voice ROMs (phrase table)
+                 TI LPC speech: TMS5220/5200, TMS5110, TMC0281/TMS5100
                  The 8-bit ones also with reversed bit order or swapped
-                 nibbles; any of them as two interleaved channels.
+                 nibbles; any plain format as two interleaved channels.
                  WAV and MP3 files stored whole inside a dump or card.
 
-NOT COVERED YET
----------------
+NOT COVERED
+-----------
 - Other programmer brands: GQ-4X4, RT809H/F, TOP, Willem, Dataman, Batronix,
   Xeltek and similar. Their makers publish no way for other software to
   drive them, so the app cannot read through them. Dumps saved from their
   own software open and decode here.
 - XGecu T56 and T76: they need algorithm files this build does not have.
-- Through a CH341A: 93-series Microwire EEPROMs and AT45 DataFlash. An
-  XGecu programmer reads both.
-- Other compressed formats: other ADPCM families, delta modulation, LPC
-  speech. These show as "not recognised".
+- 93-series Microwire EEPROMs through the 8-pin readers. They hold at most
+  2 KB, a quarter of a second of sound, and need a rewired socket. An XGecu
+  programmer reads them.
+- 24-series I2C chips through an FT232H or serprog board.
+- Sound formats not listed above, for example Sega/Namco custom chips,
+  ADPCM kinds other than the four listed, and MPEG audio chips. These show
+  as "not recognised".
+- LPC speech is found by searching for phrases. In a ROM that mixes speech
+  with program code, a few short false phrases can appear in the list.
 
 
 HOW FAR IT HAS BEEN TESTED
@@ -127,8 +173,7 @@ screen says what went wrong; and errors inside the app are written to
 
 LICENCES
 --------
-minipro (audiochip\readers\xgecu\minipro.exe and its chip database) is
-free software under the GNU GPL version 3 or later, from
-https://gitlab.com/DavidGriffith/minipro . Its licence is next to it, and
-its source and build notes are in tools\minipro-build. The app runs it as
-a separate program.
+See THIRD-PARTY.txt. In short: minipro (the XGecu helper program) is GNU
+GPL version 3 or later and runs as a separate program; its source is in
+tools\minipro-build. The sound-chip tables come from the MAME project
+(BSD 3-Clause). The other libraries are BSD, LGPL or Apache licensed.
