@@ -104,12 +104,6 @@ def pytest_unconfigure(config):
     import sys
     if _status["code"] is None or "PySide6.QtWidgets" not in sys.modules:
         return
-    from PySide6.QtWidgets import QApplication
-    app = QApplication.instance()
-    if app is not None:
-        for w in app.topLevelWidgets():
-            w.close()
-        app.processEvents()
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(_status["code"])
