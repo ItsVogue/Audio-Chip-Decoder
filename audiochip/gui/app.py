@@ -159,14 +159,8 @@ def run(argv: list[str] | None = None) -> None:
     already closed. Everything that needs saving is saved when the window closes, so the
     process simply stops here instead.
     """
-    import os
-    code = main(argv)
-    try:
-        sys.stdout.flush()
-        sys.stderr.flush()
-    except Exception:
-        pass
-    os._exit(int(code or 0))
+    from ..quit import stop_now
+    stop_now(int(main(argv) or 0))
 
 
 if __name__ == "__main__":

@@ -106,10 +106,8 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_unconfigure(config):
-    import os
     import sys
     if _status["code"] is None or "PySide6.QtWidgets" not in sys.modules:
         return
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(_status["code"])
+    from audiochip.quit import stop_now
+    stop_now(_status["code"])
