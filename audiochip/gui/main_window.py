@@ -8,17 +8,21 @@ import os
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QEventLoop, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase
 from PySide6.QtWidgets import (QApplication, QScrollArea, QButtonGroup, QCheckBox, QComboBox, QDockWidget, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
                                QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
+                               QProgressDialog,
                                QPushButton, QRadioButton, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTabWidget,
                                QTextBrowser, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__, profiles, update
-from ..codecs import CODECS, LAYOUTS, Hypothesis, decode, frames_for_bytes, is_structured
+from .. import codecs as codec_state
+from ..codecs import (CODECS, LAYOUTS, Cancelled, Hypothesis, decode, decode_seconds, frames_for_bytes, is_cached,
+                      is_structured)
 from ..collection import Chip as ChipDump
-from ..collection import Collection, Track, build, chip_audio, measure_rates, move_chip, track_audio, track_sounds
+from ..collection import (Collection, Track, build, chip_audio, decode_cost, measure_rates, move_chip, track_audio,
+                          track_sounds, warm)
 from ..export import ExportOptions, describe_reading, export
 from ..facts import selection_facts
 from ..rate import STANDARD_RATES
@@ -62,6 +66,9 @@ def _mono_font() -> QFont:
     f = QFontDatabase.systemFont(QFontDatabase.FixedFont)
     f.setPointSizeF(max(f.pointSizeF(), 9))
     return f
+
+
+HEAVY_SECONDS = 0.7       # decodes expected to take longer than this run in the background
 
 
 class MainWindow(QMainWindow):
@@ -612,7 +619,16 @@ class MainWindow(QMainWindow):
         self._stop()
         self._remember(paths)
         self.log("Opening: " + "; ".join(paths))
-        self._run(lambda prog: build(paths, prog), self._loaded, "Analysing dumps")
+        def job(prog):
+            coll = build(paths, prog)
+            try:                                  # decode what is about to be shown while still off the UI thread
+                if coll.tracks and decode_cost(coll) > 0:
+                    codec_state.cancel.clear()
+                    warm(coll, prog, remeasure=False)
+            except Exception:
+                pass                              # the window reports any problem when it shows the track
+            return coll
+        self._run(job, self._loaded, "Analysing dumps")
 
     def _run(self, fn, on_done, label: str):
         self._worker = Worker(fn, self)
@@ -636,6 +652,8 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.wait(2000)
             self._worker = None
+        self._bg: list[Worker] = []           # background decodes still running
+        self._decode_problem = ""
 
     def _error(self, what: str, msg: str):
         self.log(f"{what} failed: {msg}")
@@ -670,7 +688,12 @@ class MainWindow(QMainWindow):
             return ""
         if is_structured(hyp):
             chips = [chip] if chip is not None else track.members
-            return _clock(sum(len(decode(c.dump.data, hyp)) for c in chips) / rate)
+            if not all(is_cached(c.dump.data, hyp) for c in chips):
+                return ""                         # not decoded yet; decoding just for this column would stall
+            try:
+                return _clock(sum(len(decode(c.dump.data, hyp)) for c in chips) / rate)
+            except Exception:
+                return ""
         return _clock(frames_for_bytes(nbytes, hyp) / rate)
 
     def _fill_tree(self, keep: tuple | None = None):
@@ -718,7 +741,96 @@ class MainWindow(QMainWindow):
             self._fill_tree(keep=(track, chip))
 
     # ------------------------------------------------------------------- refresh
+    # ------------------------------------------------------- slow work, off the UI thread
+    def _background(self, job, text: str):
+        """Run job(progress) in a thread behind a progress window, keeping the app responsive.
+
+        Returns ("ok", result), ("cancelled", None) or ("failed", exception). Cancel returns at
+        once; a decoder that cannot stop mid-way finishes quietly in the background.
+        """
+        codec_state.cancel.clear()
+        dlg = QProgressDialog(text, "Cancel", 0, 0, self)
+        dlg.setWindowTitle(APP_NAME)
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setMinimumWidth(480)
+        loop = QEventLoop(self)
+        out = {"state": None, "value": None}
+
+        def finish(state, value=None):
+            if out["state"] is None:
+                out.update(state=state, value=value)
+            loop.quit()
+
+        def cancelled():
+            codec_state.cancel.set()
+            finish("cancelled")
+
+        def progress(i, n, t):
+            if out["state"] is None:
+                dlg.setMaximum(max(n, 1))
+                dlg.setValue(min(i, max(n, 1)))
+                dlg.setLabelText(text + ("\n\n" + t if t else ""))
+
+        worker = Worker(job, self)
+        worker.finished_ok.connect(lambda v: finish("ok", v))
+        worker.failed_exc.connect(lambda e: finish("cancelled" if isinstance(e, Cancelled) else "failed", e))
+        worker.progress.connect(progress)
+        dlg.canceled.connect(cancelled)
+        self._bg.append(worker)
+        worker.finished.connect(lambda w=worker: self._bg.remove(w) if w in self._bg else None)
+        worker.start()
+        dlg.show()
+        if out["state"] is None:
+            loop.exec()
+        dlg.canceled.disconnect(cancelled)          # closing the window must not count as Cancel
+        dlg.reset()
+        dlg.hide()
+        dlg.deleteLater()
+        return out["state"], out["value"]
+
+    def _selection_cost(self, track: Track, chip: ChipDump | None) -> float:
+        hyp = self.coll.hyp_for(track)
+        if hyp is None:
+            return 0.0
+        if chip is not None:
+            return 0.0 if is_cached(chip.dump.data, hyp) else decode_seconds(hyp, chip.dump.size)
+        return decode_cost(self.coll, [track])
+
     def _selection_audio(self, track: Track, chip: ChipDump | None):
+        """Decode the selection without ever stalling or bringing down the window.
+
+        A decode expected to take a while runs in the background behind a progress window; any
+        error becomes a line under the headline instead of an unhandled exception.
+        """
+        self._decode_problem = ""
+        hyp, rate = self.coll.hyp_for(track), self.coll.rate_for(track)
+        try:
+            if self._selection_cost(track, chip) > HEAVY_SECONDS:
+                name = CODECS[hyp.codec].name
+                state, value = self._background(
+                    lambda _prog: self._selection_audio_now(track, chip),
+                    f"Decoding as {name}.\nThis decoder works one sample at a time, so larger files take a while.")
+                if state == "ok":
+                    return value
+                self._decode_problem = ("Decoding was cancelled, so there is nothing to show for this encoding. "
+                                        "Pick another encoding, or select the item again to retry."
+                                        if state == "cancelled" else self._explain_decode_error(hyp, value))
+                return None, rate, [], None
+            return self._selection_audio_now(track, chip)
+        except Exception as e:
+            self._decode_problem = self._explain_decode_error(hyp, e)
+            return None, rate, [], None
+
+    def _explain_decode_error(self, hyp, error) -> str:
+        name = CODECS[hyp.codec].name if hyp else "this encoding"
+        self.log(f"Decoding as {name} failed: {type(error).__name__}: {error}")
+        return (f"This file could not be decoded as {name}: {error} Nothing was changed in the file. "
+                "Pick another encoding from the list.")
+
+    def _selection_audio_now(self, track: Track, chip: ChipDump | None):
         """Decode the selection. Returns (audio, rate, chip-boundary marks, frame where padding starts)."""
         hyp, rate = self.coll.hyp_for(track), self.coll.rate_for(track)
         if hyp is None:
@@ -791,6 +903,8 @@ class MainWindow(QMainWindow):
                              "It follows the collection setting; compare by ear if it sounds wrong.")
         if hyp is None:
             notes.insert(0, coll.detection.reason + " You can still pick an encoding from the list to hear it.")
+        if getattr(self, "_decode_problem", ""):
+            notes.insert(0, self._decode_problem)
         self.notice.setText("\n".join(notes))
         self.notice.setVisible(bool(notes))
 
@@ -962,11 +1076,34 @@ class MainWindow(QMainWindow):
         self._updating = False
 
     # ------------------------------------------------------------ settings edits
-    def _after_settings_change(self, remeasure: bool):
+    def _after_settings_change(self, remeasure: bool, undo=None):
         track, chip = self.current()
-        if remeasure:                           # keeps a confirmed speed; refreshes what each format states
+        measured = False
+        if decode_cost(self.coll) > HEAVY_SECONDS:
+            # Slow decoders run in the background behind a progress window; the results are kept,
+            # so everything below finds them ready.
+            hyp = self.coll.hyp_for(track) if track is not None else self.coll.hyp
+            name = CODECS[hyp.codec].name if hyp else "the chosen encoding"
+            coll = self.coll
+            state, value = self._background(
+                lambda prog: warm(coll, prog, remeasure),
+                f"Decoding as {name}.\nThis decoder works one sample at a time, so larger files take a while.")
+            measured = state == "ok"
+            if state != "ok":
+                if undo is not None:
+                    undo()
+                    self.log("The previous encoding was restored.")
+                if state == "failed":
+                    QMessageBox.warning(self, "Encoding", f"That encoding could not be applied.\n\n{value}"
+                                        + ("\n\nThe previous encoding was restored." if undo else ""))
+                else:
+                    self.statusBar().showMessage("Cancelled" + ("; the previous encoding was restored" if undo else ""))
+        if remeasure and not measured:          # keeps a confirmed speed; refreshes what each format states
             self.setCursor(Qt.BusyCursor)
-            measure_rates(self.coll)
+            try:
+                measure_rates(self.coll)
+            except Exception as e:
+                self.log(f"Could not measure the speed: {type(e).__name__}: {e}")
             self.unsetCursor()
         self._fill_tree(keep=(track, chip))
 
@@ -978,6 +1115,13 @@ class MainWindow(QMainWindow):
         if not key or track is None:
             return
         hyp = Hypothesis.from_key(key)
+        coll = self.coll
+        before = (coll.hyp, coll.hyp_source, [(t, t.hyp_override, t.override_auto) for t in coll.tracks])
+
+        def undo():
+            coll.hyp, coll.hyp_source = before[0], before[1]
+            for t, override, auto in before[2]:
+                t.hyp_override, t.override_auto = override, auto
         if self.scope_track.isChecked():
             track.hyp_override = hyp if hyp != self.coll.hyp else None
             track.override_auto = False
@@ -989,16 +1133,16 @@ class MainWindow(QMainWindow):
             for t in self.coll.tracks:
                 t.hyp_override = None
             self.log(f"Encoding for the collection set by hand: {hyp.label()}.")
-        self._after_settings_change(remeasure=True)
+        self._after_settings_change(remeasure=True, undo=undo)
 
     def _rate_chosen(self):
         if self._updating or self.coll is None:
             return
-        text = self.rate_combo.currentText().split()[0].replace(",", "") if self.rate_combo.currentText() else ""
+        words = self.rate_combo.currentText().replace(",", "").split()
         try:
-            rate = int(float(text))
-        except ValueError:
-            return
+            rate = int(float(words[0])) if words else 0
+        except (ValueError, OverflowError):          # letters, "inf", or a number too large to mean anything
+            rate = 0
         if not 1000 <= rate <= 192000:
             self.statusBar().showMessage("Speed must be between 1,000 and 192,000 Hz")
             return
@@ -1210,7 +1354,12 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Exported {n} file(s)")
         box = QMessageBox(self)
         box.setWindowTitle("Export finished")
-        box.setText(f"{n} file(s) written to:\n{out}")
+        bad = manifest.get("failed") or []
+        box.setText(f"{n} file(s) written to:\n{out}"
+                    + (f"\n\n{len(bad)} file(s) could not be written; Report.txt lists them and why. "
+                       f"First: {bad[0]['file']}: {bad[0]['error']}" if bad else ""))
+        if bad:
+            self.log(f"{len(bad)} file(s) could not be written: " + "; ".join(f["file"] for f in bad[:5]))
         open_btn = box.addButton("Open folder", QMessageBox.ActionRole)
         box.addButton(QMessageBox.Close)
         box.exec()
@@ -1395,8 +1544,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, e):
         self.player.close()
         self.settings.sync()                      # the process stops right after the window closes
-        if self._worker is not None:
-            self._worker.wait(3000)
+        if self._worker is not None:              # let a running export finish its file before the process stops
+            self.statusBar().showMessage("Finishing the current job before closing...")
+            QApplication.processEvents()
+            self._worker.wait(30000)
         super().closeEvent(e)
 
 

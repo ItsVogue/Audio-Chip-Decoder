@@ -269,6 +269,53 @@ def measure_rates(coll: Collection) -> None:
         coll.rate = coll.rate_estimate.best
 
 
+def decode_cost(coll: Collection, tracks: list[Track] | None = None) -> float:
+    """Estimated seconds of decoding still to do before the given tracks can be shown."""
+    from .codecs import decode_seconds, is_cached
+    total = 0.0
+    for t in (tracks if tracks is not None else coll.tracks):
+        hyp = coll.hyp_for(t)
+        if hyp is None or not t.members:
+            continue
+        if is_structured(hyp):
+            total += sum(decode_seconds(hyp, c.dump.size) for c in t.members if not is_cached(c.dump.data, hyp))
+        else:
+            data = t.joined_bytes()
+            if not is_cached(data, hyp):
+                total += decode_seconds(hyp, len(data))
+    return total
+
+
+def warm(coll: Collection, progress=None, remeasure: bool = True) -> None:
+    """Do every slow decode the window is about to ask for, so that it can be done off the UI thread.
+
+    The results stay in the decode cache; the window's own calls then return at once.
+    """
+    from .codecs import check_cancel
+    jobs = []
+    for t in coll.tracks:
+        hyp = coll.hyp_for(t)
+        if hyp is None or not t.members:
+            continue
+        if is_structured(hyp):
+            jobs += [(t, c, hyp) for c in t.members]
+        else:
+            jobs.append((t, None, hyp))
+    for i, (t, c, hyp) in enumerate(jobs):
+        check_cancel()
+        if progress:
+            progress(i, len(jobs), f"Decoding {t.name}" + (f" / {c.name}" if c is not None else ""))
+        if c is not None:
+            render(c.dump.data, hyp)
+        else:
+            track_audio(coll, t)
+    check_cancel()
+    if remeasure:
+        if progress:
+            progress(len(jobs), len(jobs), "Measuring the speed")
+        measure_rates(coll)
+
+
 def _stated_rate(track: Track, hyp: Hypothesis | None) -> int:
     """Playback speed carried by the format itself, or 0."""
     if not is_structured(hyp):

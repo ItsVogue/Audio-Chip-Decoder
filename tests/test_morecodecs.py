@@ -155,3 +155,87 @@ def test_capability_table_only_claims_encoding_where_an_encoder_exists(voice):
     with pytest.raises(ValueError):
         mc.encode("vag", voice[:1600])
     assert not mc.CAPABILITIES["vag"][2] and not mc.CAPABILITIES["pcm_wide"][2]
+
+
+# ------------------------------------------------------------------ 0.5.1 robustness
+@pytest.mark.parametrize("fmt", ["ogg", "opus", "mp3", "flac"])
+def test_long_audio_exports_without_bringing_the_program_down(fmt):
+    # 0.5.0 handed the library one huge block; its Vorbis writer overflowed the stack and the app vanished
+    x = np.random.default_rng(2).integers(-20000, 20000, (2_600_000, 1)).astype(np.int16)
+    blob, rate = audio_bytes(x, 8000, fmt)
+    y, _ = sf.read(io.BytesIO(blob), dtype="int16")
+    assert rate == 8000 and abs(len(y) - len(x)) < 5000
+
+
+@pytest.mark.parametrize("fmt", ["wav", "flac", "ogg", "opus", "mp3"])
+@pytest.mark.parametrize("frames,channels,rate", [(0, 1, 8000), (1, 1, 3000), (3, 2, 7575), (50, 1, 64000),
+                                                    (200, 2, 200000)])
+def test_export_copes_with_empty_tiny_and_odd_speed_audio(fmt, frames, channels, rate):
+    blob, out_rate = audio_bytes(np.zeros((frames, channels), dtype=np.int16), rate, fmt)
+    assert blob and out_rate > 0
+
+
+def test_every_decoder_survives_awkward_input():
+    """No decoder may raise or hang on empty, tiny, odd-sized, blank or random data."""
+    from audiochip.codecs import LAYOUTS
+    rng = np.random.default_rng(4)
+    inputs = [b"", b"\x00", bytes(7), b"\xff" * 33, bytes(range(256)) * 3 + b"\x01",
+              rng.integers(0, 256, 4099, dtype=np.uint8).tobytes(), b"\x55\xaa" * 3000,
+              b"RIFF" + bytes(40), b"VAGp" + bytes(10), b"\x00\x5a\xa5\x69\x55" + bytes(5)]
+    for codec in CODECS.values():
+        for layout in codec.layouts:
+            if layout not in LAYOUTS:
+                continue
+            for channels in (1, 2):
+                for data in inputs:
+                    x = decode(data, Hypothesis(codec.id, layout, channels))
+                    assert x.ndim == 2 and x.dtype == np.int16, (codec.id, layout, len(data))
+
+
+def test_a_header_claiming_impossible_length_is_refused_not_allocated(voice):
+    data = bytearray(_file(voice[:4000], 8000, "AU", "PCM_16"))
+    data[8:12] = b"\xff\xff\xff\xff"                                    # "unknown length": fine, reads what is there
+    assert len(render(bytes(data), Hypothesis("audiofile")).samples) <= 4000
+    wav = bytearray(_file(voice[:4000], 8000, "WAV", "PCM_16"))
+    wav[40:44] = struct.pack("<I", 0x7FFFFFF0)                          # data chunk far larger than the file
+    r = render(bytes(wav), Hypothesis("audiofile"))
+    assert len(r.samples) <= 4000
+
+
+def test_slow_decoders_refuse_oversized_input_and_the_cache_stays_bounded(monkeypatch, voice):
+    from audiochip import codecs
+    from conftest import encode
+    data = encode(voice[:30000], "oki_hi")
+    monkeypatch.setattr(codecs, "MAX_SLOW_INPUT", 5000)
+    with pytest.raises(codecs.TooLarge):
+        decode(data, Hypothesis("oki_hi"))
+    monkeypatch.setattr(codecs, "MAX_SLOW_INPUT", 64 << 20)
+    monkeypatch.setattr(codecs, "CACHE_BYTES", 150_000)
+    first = decode(data, Hypothesis("oki_hi")).copy()
+    for cut in (14000, 13000, 12000, 11000):
+        decode(data[:cut], Hypothesis("oki_hi"))
+    assert sum(codecs._size_of(v) for v in codecs._cache.values()) <= 150_000 + 60_000
+    assert np.array_equal(decode(data, Hypothesis("oki_hi")), first)
+    assert codecs.decode_seconds(Hypothesis("u8"), 1 << 20) == 0 and codecs.decode_seconds(Hypothesis("lpc_5220"), 1 << 20) > 10
+
+
+def test_one_unwritable_file_does_not_stop_an_export(tmp_path, voice, monkeypatch):
+    from audiochip import export as ex
+    for name, cut in (("A", 9000), ("B", 12000)):
+        (tmp_path / "in" / name).mkdir(parents=True)
+        (tmp_path / "in" / name / "1.bin").write_bytes(__import__("conftest").encode(voice[:cut], "u8"))
+    coll = build([tmp_path / "in"])
+    real = ex.audio_bytes
+    monkeypatch.setattr(ex, "audio_bytes", lambda x, rate, fmt="wav": (_ for _ in ()).throw(OSError("disk says no"))
+                        if len(x) == 9000 else real(x, rate, fmt))
+    m = export(coll, tmp_path / "out", ExportOptions(trim_padding=False))
+    assert len(m["failed"]) == 2 and "disk says no" in m["failed"][0]["error"]         # track A: joined and chip
+    assert len(m["files"]) == 2 and all(f["track"] == "B" for f in m["files"])
+    assert "COULD NOT BE WRITTEN" in (tmp_path / "out" / "Report.txt").read_text()
+
+
+def test_mp3_of_audio_with_more_than_two_channels_keeps_the_first_two(voice):
+    six = np.stack([voice[:8000]] * 6, axis=1)
+    blob, _ = audio_bytes(six, 8000, "mp3")
+    y, _ = sf.read(io.BytesIO(blob), dtype="int16")
+    assert y.ndim == 2 and y.shape[1] == 2

@@ -73,6 +73,11 @@ def read_container(data: bytes):
     sf = _sf()
     with sf.SoundFile(io.BytesIO(bytes(data))) as f:
         desc = f"{f.format} / {f.subtype}, {f.channels} channel{'s' if f.channels != 1 else ''}, {f.samplerate:,} Hz"
+        # A damaged header can claim billions of samples. No file holds more than a few hundred
+        # samples per byte, so anything beyond that is refused rather than asked of memory.
+        if f.frames < 0 or f.frames * f.channels > max(len(data) * 400, 1 << 16) or f.channels > 8:
+            raise ValueError(f"the header claims {f.frames:,} samples in {f.channels} channels, which this "
+                             f"{len(data):,}-byte file cannot hold")
         x = f.read(f.frames, dtype="int16", always_2d=True)      # a count is required for streams that cannot seek
         return x, int(f.samplerate), desc
 
@@ -173,6 +178,9 @@ def psx_decode(data: bytes) -> tuple[np.ndarray, list[tuple[int, int]]]:
     start = 0
     spans = []
     for i in range(n):
+        if not i & 4095:
+            from .codecs import check_cancel
+            check_cancel()
         blk = data[i * 16: i * 16 + 16]
         shift, filt, flag = blk[0] & 15, blk[0] >> 4, blk[1]
         if filt > 4 or not any(blk):

@@ -1,4 +1,4 @@
-AUDIO CHIP DECODER 0.5.0
+AUDIO CHIP DECODER 0.5.1
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports audio files.
@@ -214,6 +214,13 @@ Decoders:
   words (over 99% found) and on random data. The synthesiser follows the
   documented chip behaviour; its output has been measured, not listened to.
   TMS5110 and TMC0281 data look the same, so try both if one sounds off.
+
+Robustness (0.5.1): every entry of the Encoding list is tried on every
+kind of file (voice, random, tiny, one byte, blank, odd-sized, whole and
+damaged audio files) in the automated checks; 840 deliberately corrupted
+audio files were decoded without a crash; decoders that work one sample at
+a time run in the background behind a progress window with Cancel; an
+error while decoding shows as a line under the headline.
 
 If something fails: the installer names the step that stopped; the Read
 screen says what went wrong; and errors inside the app are written to

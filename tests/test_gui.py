@@ -577,3 +577,137 @@ def test_an_audio_file_opens_like_a_dump_and_states_its_speed(app, tmp_path, mon
     w._encoding_chosen(keys.index("g721/normal/1"))
     assert w.coll.hyp == Hypothesis("g721") and w._audio is not None
     w.close()
+
+
+# ------------------------------------------------------------------ 0.5.1 robustness
+def _slow_window(app, tmp_path, monkeypatch, voice, size=40000):
+    from conftest import encode
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    (tmp_path / "Board").mkdir()
+    (tmp_path / "Board" / "1.bin").write_bytes(encode(voice[:size], "u8"))
+    w = MainWindow()
+    w.show()
+    w.load_paths([str(tmp_path / "Board")])
+    _wait(w)
+    return w, [w.enc_combo.itemData(i) for i in range(w.enc_combo.count())]
+
+
+def test_a_slow_decoder_runs_in_the_background_and_then_shows(app, tmp_path, monkeypatch, voice):
+    w, keys = _slow_window(app, tmp_path, monkeypatch, voice)
+    used = []
+    real = w._background
+    monkeypatch.setattr(w, "_background", lambda job, text: (used.append(text), real(job, text))[1])
+    w._encoding_chosen(keys.index("lpc_5220/normal/1"))
+    assert used and "one sample at a time" in used[0]
+    assert w.coll.hyp == Hypothesis("lpc_5220") and w._decode_problem == ""
+    used.clear()
+    w.tree.setCurrentItem(w.tree.topLevelItem(0).child(0))            # already decoded: no second wait
+    w.tree.setCurrentItem(w.tree.topLevelItem(0))
+    assert not used
+    w.close()
+
+
+def test_cancelling_a_slow_decode_restores_the_previous_encoding(app, tmp_path, monkeypatch, voice):
+    import time
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QProgressDialog
+    from audiochip import codecs
+    from audiochip.gui import main_window as mw
+    w, keys = _slow_window(app, tmp_path, monkeypatch, voice, 41000)    # other sizes: not already decoded
+    before = w.coll.hyp
+
+    def never_ending(coll, progress=None, remeasure=True):
+        for i in range(2000):
+            time.sleep(0.01)
+            codecs.check_cancel()
+    monkeypatch.setattr(mw, "warm", never_ending)
+    QTimer.singleShot(200, lambda: [d.canceled.emit() for d in w.findChildren(QProgressDialog)])   # as the button does
+    t = time.time()
+    w._encoding_chosen(keys.index("lpc_5220/normal/1"))
+    assert time.time() - t < 5 and w.coll.hyp == before
+    assert "Cancelled" in w.statusBar().currentMessage() and w._audio is not None and len(w._audio)
+    for _ in range(100):                                              # the worker notices and stops
+        app.processEvents()
+        if not w._bg:
+            break
+        time.sleep(0.02)
+    assert not w._bg
+    w.close()
+
+
+def test_a_decoder_that_fails_reports_it_and_keeps_the_window_alive(app, tmp_path, monkeypatch, voice):
+    from PySide6.QtWidgets import QMessageBox
+    from audiochip.gui import main_window as mw
+    w, keys = _slow_window(app, tmp_path, monkeypatch, voice, 42000)
+    before = w.coll.hyp
+    shown = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
+    monkeypatch.setattr(mw, "warm", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("decoder broke")))
+    w._encoding_chosen(keys.index("lpc_5220/normal/1"))
+    assert shown and "decoder broke" in shown[0] and w.coll.hyp == before
+    # an error while decoding what is on screen becomes a notice, not an exception
+    monkeypatch.setattr(w, "_selection_audio_now", lambda *a: (_ for _ in ()).throw(ValueError("bad block")))
+    w.refresh()
+    assert "could not be decoded" in w.notice.text() and "bad block" in w.notice.text()
+    assert not w.play_btn.isEnabled() and w._audio is None
+    w.listening_check()                                               # nothing to play: must simply do nothing
+    w._play_sound()
+    w.close()
+
+
+def test_duration_column_never_decodes_on_the_ui_thread(app, tmp_path, monkeypatch, voice):
+    from audiochip import codecs
+    w, keys = _slow_window(app, tmp_path, monkeypatch, voice, 39000)
+    track = w.coll.tracks[0]
+    w.coll.hyp = Hypothesis("lpc_0281")                               # not decoded yet
+    assert not codecs.is_cached(track.members[0].dump.data, w.coll.hyp)
+    assert w._duration(0, track) == ""
+    w.close()
+
+
+def test_every_encoding_can_be_chosen_for_every_kind_of_file(app, tmp_path, monkeypatch, voice, music):
+    """The sweep that found the 0.5.0 problems: each entry of the Encoding list, on each kind of file."""
+    import io
+    import numpy as np
+    from conftest import encode
+    sf = pytest.importorskip("soundfile")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    buf = io.BytesIO()
+    sf.write(buf, np.stack([voice[:6000], music[:6000]], axis=1), 22050, format="WAV", subtype="PCM_16")
+    cases = {"voice": encode(voice[:9000], "u8"), "random": np.random.default_rng(1).integers(0, 256, 6000, dtype=np.uint8).tobytes(),
+             "tiny": bytes(range(50)), "one": b"\x7f", "blank": b"\xff" * 4096, "odd": encode(voice[:7001], "u8"),
+             "song": buf.getvalue(), "cut": buf.getvalue()[:900], "riff": b"RIFF\xff\xff\xff\xffWAVEfmt " + bytes(300)}
+    tried = 0
+    for name, data in cases.items():
+        d = tmp_path / name
+        d.mkdir()
+        (d / ("a.wav" if name in ("song", "cut", "riff") else "a.bin")).write_bytes(data)
+        w = MainWindow()
+        w.show()
+        w.load_paths([str(d)])
+        _wait(w)
+        assert w.coll is not None and w.coll.tracks, name
+        for pick in (lambda: w.tree.topLevelItem(0), lambda: w.tree.topLevelItem(0).child(0)):
+            w.tree.setCurrentItem(pick())                   # fetched afresh: the list is rebuilt after each change
+            for i in range(w.enc_combo.count()):
+                if not w.enc_combo.itemData(i):
+                    continue
+                w.enc_combo.setCurrentIndex(i)
+                w._encoding_chosen(i)                       # must neither raise nor leave the window broken
+                assert w._audio is None or w._audio.ndim == 2, (name, w.enc_combo.itemData(i))
+                tried += 1
+            w._show_details(2)
+            w._reset_auto()
+        w.close()
+    assert tried > 600
+
+
+def test_speed_box_ignores_blank_and_meaningless_input(win):
+    before = win.coll.rate
+    for text in ("", "   ", "abc", "0", "-5", "999", "inf", "nan", "1e99", "9999999999"):
+        win.rate_combo.setEditText(text)
+        win._rate_chosen()
+        assert win.coll.rate == before, text
+    win.rate_combo.setEditText("24,000 Hz")
+    win._rate_chosen()
+    assert win.coll.rate_for(win.current()[0]) == 24000

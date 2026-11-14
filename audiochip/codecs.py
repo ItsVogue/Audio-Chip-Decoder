@@ -7,6 +7,7 @@ Adding a format means adding one function and one Codec entry here.
 from __future__ import annotations
 
 import hashlib
+import threading
 from dataclasses import dataclass
 from typing import Callable
 
@@ -569,17 +570,74 @@ class Hypothesis:
 
 _SLOW = ("adpcm", "delta", "chip")        # decoded sample by sample in Python: worth remembering
 _cache: dict[tuple, object] = {}
+_cache_lock = threading.Lock()
+CACHE_BYTES = 384 << 20                   # decoded audio kept in memory, most recently used first
+MAX_SLOW_INPUT = 64 << 20                 # the sample-by-sample decoders refuse dumps larger than this
+cancel = threading.Event()                # set to make the long-running decoders stop early
+
+
+class Cancelled(Exception):
+    """A long decode was stopped at the user's request."""
+
+
+class TooLarge(ValueError):
+    """The dump is too big for a decoder that works one sample at a time."""
+
+
+def check_cancel() -> None:
+    """Stop a background decode that the user cancelled. Decodes on the main thread are never stopped."""
+    if cancel.is_set() and threading.current_thread() is not threading.main_thread():
+        raise Cancelled("Decoding was cancelled.")
+
+
+def _size_of(value) -> int:
+    samples = getattr(value, "samples", value)
+    return int(getattr(samples, "nbytes", 0)) + 256
 
 
 def _remember(key: tuple, make):
-    if key in _cache:
-        _cache[key] = _cache.pop(key)          # move to the end: most recently used
-        return _cache[key]
-    value = make()
-    _cache[key] = value
-    while len(_cache) > 12:
-        _cache.pop(next(iter(_cache)))
+    with _cache_lock:
+        if key in _cache:
+            _cache[key] = _cache.pop(key)          # move to the end: most recently used
+            return _cache[key]
+    value = make()                                 # outside the lock: this is the slow part
+    with _cache_lock:
+        _cache[key] = value
+        total = sum(_size_of(v) for v in _cache.values())
+        while total > CACHE_BYTES and len(_cache) > 1:
+            total -= _size_of(_cache.pop(next(iter(_cache))))
     return value
+
+
+def _key(b: np.ndarray, hyp: "Hypothesis") -> tuple:
+    return (("render", hyp.key) if CODECS[hyp.codec].structured else (hyp.key,)) + (len(b), _digest(b))
+
+
+def is_cached(data, hyp: "Hypothesis") -> bool:
+    """True if decoding these bytes this way costs nothing because the result is already held."""
+    b = _as_array(data)
+    codec = CODECS[hyp.codec]
+    if codec.family not in _SLOW or (len(b) <= 4096 and not codec.structured):
+        return True
+    with _cache_lock:
+        return _key(b, hyp) in _cache
+
+
+# Rough decoding cost in seconds per megabyte on an ordinary PC, for the decoders written in
+# Python. Measured on the build machine's class of hardware; used only to decide whether a
+# decode should run in the background with a progress window.
+_COST = {"lpc": 25.0, "cvsd": 9.0, "vag": 3.0, "upd7759": 2.5, "oki_table": 2.5, "adpcm": 2.5}
+
+
+def decode_seconds(hyp: "Hypothesis | None", nbytes: int) -> float:
+    """Estimated time to decode this many bytes this way; 0 for the fast decoders."""
+    if hyp is None:
+        return 0.0
+    codec = CODECS[hyp.codec]
+    if codec.family not in _SLOW or codec.id in ("audiofile", "g721", "g723_24", "g723_40", "gsm610"):
+        return 0.0
+    per_mb = (_COST["lpc"] if codec.id.startswith("lpc_") else _COST.get(codec.id) or _COST["adpcm"])
+    return per_mb * nbytes / (1 << 20)
 
 
 def _as_array(data) -> np.ndarray:
@@ -604,7 +662,10 @@ def decode(data: bytes | np.ndarray, hyp: Hypothesis) -> np.ndarray:
         n = len(x) // ch * ch
         return x[:n].reshape(-1, ch)
     if codec.family in _SLOW and len(b) > 4096:
-        return _remember((hyp.key, len(b), _digest(b)), run)
+        if len(b) > MAX_SLOW_INPUT and decode_seconds(hyp, len(b)) > 0:
+            raise TooLarge(f"{codec.name} is decoded one sample at a time and this dump is "
+                           f"{len(b) / (1 << 20):.0f} MB. The limit for it is {MAX_SLOW_INPUT >> 20} MB.")
+        return _remember(_key(b, hyp), run)
     return run()
 
 
@@ -612,7 +673,10 @@ def render(data: bytes | np.ndarray, hyp: Hypothesis):
     """Decode a structured chip format: audio, playback speed if stated, and the separate sounds."""
     b = _as_array(data)
     make = RENDERERS[hyp.codec]
-    return _remember(("render", hyp.key, len(b), _digest(b)), lambda: make(LAYOUTS[hyp.layout][1](b)))
+    if len(b) > MAX_SLOW_INPUT and decode_seconds(hyp, len(b)) > 0:
+        raise TooLarge(f"{CODECS[hyp.codec].name} is decoded one step at a time and this dump is "
+                       f"{len(b) / (1 << 20):.0f} MB. The limit for it is {MAX_SLOW_INPUT >> 20} MB.")
+    return _remember(_key(b, hyp), lambda: make(LAYOUTS[hyp.layout][1](b)))
 
 
 def is_structured(hyp: Hypothesis | None) -> bool:

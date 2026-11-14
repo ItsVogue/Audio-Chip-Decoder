@@ -42,6 +42,7 @@ MP3_RATES = (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000)
 FORMATS = {"wav": "WAV, 16-bit (exact)", "flac": "FLAC (smaller, still exact)", "mp3": "MP3 (smallest, lossy)",
            "ogg": "Ogg Vorbis (small, lossy)", "opus": "Opus (small, lossy)"}
 OPUS_RATES = (8000, 12000, 16000, 24000, 48000)
+WRITE_BLOCK = 1 << 14
 
 
 class FormatUnavailable(RuntimeError):
@@ -58,29 +59,39 @@ def audio_bytes(x: np.ndarray, rate: int, fmt: str = "wav") -> tuple[bytes, int]
         raise FormatUnavailable(f"{fmt.upper()} output needs the 'soundfile' package ({e}).") from e
     if x.ndim == 1:
         x = x.reshape(-1, 1)
-    buf = io.BytesIO()
-    if fmt == "flac":
-        sf.write(buf, x, int(rate), format="FLAC", subtype="PCM_16")
-        return buf.getvalue(), rate
-    if fmt == "ogg":
-        sf.write(buf, x, int(rate), format="OGG", subtype="VORBIS")
-        return buf.getvalue(), rate
-    if fmt in ("mp3", "opus"):
+    if not len(x):                                           # some writers produce nothing at all for no audio
+        x = np.zeros((1, x.shape[1] or 1), dtype=np.int16)
+    out_rate = int(rate)
+    if fmt in ("mp3", "opus"):                               # these only allow a fixed set of speeds
         allowed = MP3_RATES if fmt == "mp3" else OPUS_RATES
         out_rate = next((r for r in allowed if r >= rate), allowed[-1])
-        if out_rate != rate:                                 # MP3 only allows a fixed set of speeds
+        if out_rate != rate and len(x):
             n = max(int(round(len(x) * out_rate / rate)), 1)
             pos = np.arange(n) * (rate / out_rate)
             x = np.stack([np.interp(pos, np.arange(len(x)), x[:, c]) for c in range(x.shape[1])], axis=1)
             x = np.clip(np.round(x), -32768, 32767).astype(np.int16)
-        if fmt == "opus":
-            sf.write(buf, x, out_rate, format="OGG", subtype="OPUS")
-            return buf.getvalue(), out_rate
-        if "MP3" not in sf.available_formats():
-            raise FormatUnavailable("This copy of the sound library cannot write MP3.")
-        sf.write(buf, x, out_rate, format="MP3")
-        return buf.getvalue(), out_rate
-    raise ValueError(fmt)
+    kind, subtype = {"flac": ("FLAC", "PCM_16"), "ogg": ("OGG", "VORBIS"), "opus": ("OGG", "OPUS"),
+                     "mp3": ("MP3", None)}.get(fmt, (None, None))
+    if kind is None:
+        raise ValueError(fmt)
+    if kind not in sf.available_formats():
+        raise FormatUnavailable(f"This copy of the sound library cannot write {fmt.upper()}.")
+    if x.shape[1] > 2 and fmt == "mp3":                      # MP3 holds one or two channels: keep the first two
+        x = x[:, :2]
+    x = np.ascontiguousarray(x, dtype=np.int16)
+    buf = io.BytesIO()
+    try:
+        with sf.SoundFile(buf, mode="w", samplerate=out_rate, channels=x.shape[1], format=kind,
+                          subtype=subtype) as f:
+            # In pieces: handing libsndfile one very large block makes its Vorbis writer overflow
+            # the stack, which ends the whole program instead of raising an error.
+            for i in range(0, len(x), WRITE_BLOCK):
+                f.write(x[i:i + WRITE_BLOCK])
+    except FormatUnavailable:
+        raise
+    except Exception as e:
+        raise FormatUnavailable(f"The sound library could not write {fmt.upper()} at {out_rate:,} Hz: {e}") from e
+    return buf.getvalue(), out_rate
 
 
 @dataclass
@@ -121,10 +132,18 @@ def export(coll: Collection, outdir: str | Path, opts: ExportOptions | None = No
         used.add(str(cand).lower())
         return cand
 
+    failed = []
+
     def write_audio(rel: Path, x: np.ndarray, rate: int, entry: dict) -> None:
-        x, info = clean(x, rate, opts.cleanup)
-        blob, out_rate = audio_bytes(x, rate, opts.fmt)
-        digest = _write(outdir / rel, blob)
+        # One file that cannot be written must not stop the rest: note it and carry on.
+        try:
+            x, info = clean(x, rate, opts.cleanup)
+            blob, out_rate = audio_bytes(x, rate, opts.fmt)
+            digest = _write(outdir / rel, blob)
+        except Exception as e:
+            failed.append({"file": rel.as_posix(), "track": entry.get("track", ""),
+                           "error": f"{type(e).__name__}: {e}"})
+            return
         entry.update({"wav": rel.as_posix(), "frames": int(len(x)), "seconds": round(len(x) / rate, 3),
                       "rate": rate, "wav_sha256": digest})
         if out_rate != rate:
@@ -195,6 +214,7 @@ def export(coll: Collection, outdir: str | Path, opts: ExportOptions | None = No
     manifest = {
         "app": f"{APP_NAME} {__version__}",
         "exported": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "failed": failed,
         "options": {"per_chip": opts.per_chip, "joined": opts.joined, "trim_padding": opts.trim_padding,
                     "per_sound": opts.per_sound, "format": opts.fmt, "cleanup": opts.cleanup.describe()},
         "collection": {
@@ -295,6 +315,11 @@ def report_text(coll: Collection, manifest: dict) -> str:
         for p, why in coll.errors:
             add(f"  {p.name}: {why}")
     add("")
+    if manifest.get("failed"):
+        add("FILES THAT COULD NOT BE WRITTEN")
+        for f in manifest["failed"]:
+            add(f"  {f['file']}: {f['error']}")
+        add("")
     add("FILES WRITTEN (SHA-256 of each source and output is in manifest.json)")
     for f in manifest["files"]:
         if "seconds" in f:

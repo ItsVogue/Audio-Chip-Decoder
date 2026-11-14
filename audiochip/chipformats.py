@@ -22,6 +22,11 @@ import numpy as np
 from .lpc_tables import KBITS, TABLES
 
 
+def _check_cancel() -> None:
+    from .codecs import check_cancel
+    check_cancel()
+
+
 @dataclass
 class Sound:
     start: int            # first sample
@@ -228,6 +233,7 @@ def oki_table_render(b: np.ndarray) -> Rendered:
 
 # -------------------------------------------------------------------- TI LPC
 LPC_RATE = 8000
+LPC_MAX_BYTES = 4 << 20
 _LPC_MAX_FRAMES = 800           # 20 seconds; longer than any real phrase
 _LPC_MIN_FRAMES = 8
 _LPC_ROUGH_LIMIT = 0.55         # random data scores about 1.0, speech about 0.25
@@ -241,11 +247,39 @@ class _BitTable:
         self.nbits = len(bits)
         pad = np.concatenate([bits, np.zeros(8, dtype=np.uint8)]).astype(np.int32)
         self.v = {}
+        self.a = {}                                         # the same values as arrays, for whole-dump tests
         for n in (1, 3, 4, 5, 6):
             acc = np.zeros(self.nbits, dtype=np.int32)
             for i in range(n):
                 acc = (acc << 1) | pad[i: i + self.nbits]
+            self.a[n] = acc
             self.v[n] = acc.tolist()
+
+    def can_reach_stop(self, pitch_bits: int) -> np.ndarray:
+        """For every byte offset: does a phrase starting there reach a stop code within 1,024 frames?
+
+        Where a frame starts decides where the next one starts, so every start position has one
+        fixed path through the data. Following all paths at once (doubling the look-ahead each
+        round) answers the question for the whole dump in a moment. Offsets that fail cannot
+        hold a phrase and are skipped; without this, data that is not LPC at all made the search
+        walk hundreds of frames from every single byte.
+        """
+        n = self.nbits
+        e = self.a[4]
+        idx = np.arange(n, dtype=np.int64)
+        rep = self.a[1][np.minimum(idx + 4, n - 1)]
+        pitch = self.a[pitch_bits][np.minimum(idx + 5, n - 1)]
+        length = np.where(e == 0, 4, np.where(rep == 1, 5 + pitch_bits,
+                                              5 + pitch_bits + 18 + np.where(pitch != 0, 21, 0)))
+        jump = np.minimum(idx + length, n).astype(np.int32)   # n is the "ran off the end" position
+        hit = e == 15
+        hit[max(n - 3, 0):] = False                           # too close to the end to be read as a code
+        jump = np.append(np.where(hit, n, jump), n).astype(np.int32)
+        hit = np.append(hit, False)
+        for _ in range(10):
+            hit = hit | hit[jump]
+            jump = jump[jump]
+        return hit[:-1][::8].copy()
 
 
 def _lpc_parse(bt: _BitTable, pos: int, pitch_bits: int, strict: bool):
@@ -327,8 +361,13 @@ def lpc_scan(b: np.ndarray, pitch_bits: int, max_bytes: int | None = None):
     found = []
     o = 0
     n = len(b)
+    if n < 2:
+        return found
+    possible = bt.can_reach_stop(pitch_bits).tolist()
     while o < n:
-        got = _lpc_parse(bt, o * 8, pitch_bits, True)
+        if not o & 2047:
+            _check_cancel()
+        got = _lpc_parse(bt, o * 8, pitch_bits, True) if possible[o] else None
         if got:
             frames, end_bit, _ = got
             end = (end_bit + 7) // 8
@@ -396,8 +435,14 @@ def lpc_synth(frames, variant: str) -> np.ndarray:
 
 def lpc_render(b: np.ndarray, variant: str) -> Rendered:
     pitch_bits = TABLES[variant]["pitch_bits"]
+    if len(b) > LPC_MAX_BYTES:
+        raise ValueError(f"LPC speech chips hold a few hundred kilobytes at most; this dump is "
+                         f"{len(b) / (1 << 20):.1f} MB, more than the {LPC_MAX_BYTES >> 20} MB this decoder accepts.")
     found = lpc_scan(b, pitch_bits)
-    pieces = [(lpc_synth(frames, variant), f"Phrase at 0x{off:05X}", off) for off, frames, _ in found]
+    pieces = []
+    for off, frames, _ in found:
+        _check_cancel()
+        pieces.append((lpc_synth(frames, variant), f"Phrase at 0x{off:05X}", off))
     samples, sounds = _join(pieces, LPC_RATE // 4)
     covered = sum(end - off for off, _, end in found)
     note = (f"{len(sounds)} LPC speech phrases found, covering {covered:,} of {len(b):,} bytes. "
