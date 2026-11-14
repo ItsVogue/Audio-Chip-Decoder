@@ -29,7 +29,7 @@ jobs:
               echo "$tag: target is not on main, left alone"; fail=1; continue
             fi
             if [ "$old" = "$new" ]; then echo "$tag: already moved"; continue; fi
-            if gh api -X PATCH "repos/${{ github.repository }}/git/refs/tags/$tag" -f sha="$new" -F force=true --silent; then
+            if git push --force origin "$new:refs/tags/$tag"; then
               echo "$tag: moved to $new"
             else
               echo "$tag: could not be moved"; fail=1
