@@ -73,8 +73,8 @@ class SerialReader:
             raise ReaderError("The chip size is not known. Pick the size before reading.")
         if chip.family == "i2c_eeprom":
             if not self.has_i2c:
-                raise ReaderError(f"The {self.name} reads SPI chips only. 24-series I2C chips need a CH341A "
-                                  "or CH347 with WCH's driver.")
+                raise ReaderError(f"The {self.name} reads SPI chips only. 24-series I2C chips need a CH341A, "
+                                  "a CH347 or an FT232H board.")
             return self._read_i2c(chip, progress, cancel)
         if chip.family == "at45":
             return self._read_at45(chip, progress, cancel)

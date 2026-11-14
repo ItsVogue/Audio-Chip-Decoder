@@ -64,6 +64,15 @@ jobs:
           Write-Host "Presence check with nothing plugged in said: $out"
           exit 0
 
+      - name: Check that the bundled FFmpeg helper runs on Windows
+        shell: pwsh
+        working-directory: audiochip/ffhelper
+        run: |
+          $out = (& .\ffmpeg.exe -hide_banner -version 2>&1 | Out-String)
+          Write-Host $out
+          if ($out -notmatch "ffmpeg version") { Write-Error "ffmpeg.exe did not start"; exit 1 }
+          if ($out -match "enable-gpl|enable-nonfree") { Write-Error "the helper must stay LGPL"; exit 1 }
+
       - name: Build the standalone program
         shell: pwsh
         run: >
@@ -71,6 +80,7 @@ jobs:
           --icon audiochip/gui/icon.ico
           --add-data "audiochip/gui/icon.ico;audiochip/gui"
           --add-data "audiochip/readers/xgecu;audiochip/readers/xgecu"
+          --add-data "audiochip/ffhelper;audiochip/ffhelper"
           --collect-all libusb_package
           --collect-all soundfile
           --collect-all sounddevice

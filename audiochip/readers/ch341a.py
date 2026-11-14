@@ -179,7 +179,7 @@ SERIAL_READERS = {
     "ft232h": "FT232H board",
     "serprog": "Pico / Arduino reader (serprog)",
 }
-SPI_ONLY = ("ft232h", "serprog")
+SPI_ONLY = ("serprog",)                 # the serprog protocol has no I2C command
 
 
 def open_reader(kind: str = "ch341a", port: str | None = None) -> SerialReader:

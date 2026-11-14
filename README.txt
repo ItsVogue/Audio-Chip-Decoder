@@ -1,4 +1,4 @@
-AUDIO CHIP DECODER 0.5.1
+AUDIO CHIP DECODER 0.6.0
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports audio files.
@@ -63,8 +63,13 @@ CH347 adapter  (8-pin serial chips, faster)
    Same driver and same steps as the CH341A. Its mode jumper must select
    SPI/I2C.
 
-FT232H / FT2232H / FT4232H board  (SPI chips, wired by hand)
-   Port A: AD0 clock, AD1 to the chip, AD2 from the chip, AD3 chip select.
+FT232H / FT2232H / FT4232H board  (SPI and 24-series I2C chips, wired by hand)
+   SPI, port A: AD0 clock, AD1 to the chip, AD2 from the chip, AD3 chip select.
+   I2C (24-series), port A: AD0 to SCL (pin 6); AD1 and AD2 joined together
+   to SDA (pin 5), with a resistor of about 4.7 k from SDA to 3.3 V; pins 1,
+   2, 3, 4 and 7 to GND; pin 8 to 3.3 V. Boards with an I2C switch join the
+   two pins and supply the resistor when the switch is on. The Read screen
+   shows the wiring for the chip family chosen.
    Uses FTDI's driver, which Windows normally installs by itself.
 
 Raspberry Pi Pico or Arduino running serprog firmware  (SPI chips)
@@ -135,8 +140,9 @@ Reads directly:  Through an XGecu T48, TL866II Plus or TL866A/CS: parallel
                  Through a CH341A or CH347: 25-series SPI flash and AT45DB
                    DataFlash (identified automatically), 24-series I2C
                    EEPROM, 25/95-series SPI EEPROM.
-                 Through an FT232H board or a serprog board: the SPI chips
-                   above (no I2C).
+                 Through an FT232H board: the same SPI chips, and
+                   24-series I2C EEPROM.
+                 Through a serprog board: the SPI chips above.
                  Memory cards and USB drives, first 16, 64 or 256 MB.
 Decodes:         8-bit unsigned, signed, sign-and-magnitude
                  8-bit mu-law and A-law, standard and inverted storage
@@ -155,12 +161,32 @@ Also opens:      Ordinary audio files: WAV (PCM 8/16/24/32-bit, Microsoft
                    mu-law), FLAC, Ogg Vorbis, Opus, MP3, AIFF, AU, CAF
                    (including ALAC), VOC. These carry their own speed.
                  Sony PlayStation ADPCM: VAG files and raw SPU blocks.
+                 Through FFmpeg, which the app carries as a small helper:
+                   AAC / HE-AAC (ADTS, M4A, MP4, 3GP), WMA 1, 2, Pro,
+                   Lossless and Voice (ASF, XWMA), AMR-NB and AMR-WB,
+                   Speex (Ogg), QCELP and EVRC (QCP, 3G2), CRI ADX, EA
+                   ADPCM (SCHl), Bink Audio, Creative ADPCM (VOC, WAV),
+                   Nintendo DSP ADPCM in BRSTM / BFSTM / GENH, and WAV or
+                   CAF files holding other codecs (Yamaha ADPCM, G.723.1,
+                   G.729, TrueSpeech, Apple Lossless...). These files are
+                   also found when they sit inside a larger dump: each one
+                   becomes a sound in the list.
+                 AMR-NB frames stored without a file header (recognised by
+                   the unbroken chain of frame headers).
+                 SNES BRR sample files (.brr, with or without the 2-byte
+                   loop header).
+                 Nintendo DSP ADPCM in a standard single-channel .dsp file.
 Pick by hand:    These are in the Encoding list but are never chosen
                  automatically, because nothing in the bytes proves them:
                  G.721 / G.726 at 32 kbit/s (either nibble order), G.723 at
                    24 and 40 kbit/s, GSM 06.10 full rate
                  Raw PCM 24-bit and 32-bit, signed or unsigned, either
                    byte order (the top 16 bits are kept)
+                 G.726 at 16 kbit/s, either bit packing
+                 Yamaha ADPCM-A (YM2610 / YM2608 sample ROMs): played at
+                   18,518 Hz, the rate with the usual 8 MHz clock
+                 SNES BRR data that is not a single sample file (several
+                   samples end to end are split at their end flags)
 Writes:          WAV, FLAC, MP3, Ogg Vorbis, Opus.
 Unknown formats: when nothing decodes, the app looks for fixed-size frames
                  with a repeating marker and reports the frame size and
@@ -176,11 +202,18 @@ NOT COVERED
 - 93-series Microwire EEPROMs through the 8-pin readers. They hold at most
   2 KB, a quarter of a second of sound, and need a rewired socket. An XGecu
   programmer reads them.
-- 24-series I2C chips through an FT232H or serprog board.
-- Not decoded yet, because each needs either FFmpeg (a large extra
-  program) or a decoder checked against a reference: AAC / HE-AAC, WMA,
-  AMR-NB / AMR-WB, Speex, QCELP, CRI ADX, Nintendo DSP ADPCM, EA ADPCM,
-  Bink Audio, SNES BRR, Creative ADPCM, Yamaha ADPCM-A.
+- 24-series I2C chips through a serprog board: the serprog protocol has
+  no I2C command, so no software can do this. Use a CH341A, CH347 or
+  FT232H. On an FT232H, Microchip's 24LC1025 / 24AA1025 are not supported
+  (their upper-half select bit sits elsewhere); AT24C1024 / AT24CM01 are.
+- The FFmpeg formats are recognised by their file header or sync pattern.
+  Bare frames with no header (other than AMR-NB) cannot be told apart from
+  noise, so they are not decoded.
+- Included but not yet tried on a real file, because no sample could be
+  obtained: QCELP / EVRC, EA ADPCM, Bink Audio, Creative ADPCM, WMA Voice,
+  XWMA, BRSTM / BFSTM / GENH. FFmpeg's own decoders handle them; if one
+  fails, the app says so and nothing else is affected.
+- Two-channel .dsp variants and ADX files that are encrypted.
 - Generalplus / Sunplus speech (GPDS, unSP, A1600, A1800 and relatives):
   no published, verified decoder is built in. Frames of these formats are
   detected and reported (size and marker bytes) but not decoded.
@@ -193,16 +226,18 @@ NOT COVERED
 HOW FAR IT HAS BEEN TESTED
 --------------------------
 On Windows, automatically, for every version (GitHub's Windows build
-machine): all 124 automated checks pass; the bundled XGecu helper starts
-and answers "No programmer found"; the standalone program is built, opens
-its window, decodes a test signal, writes FLAC and MP3, and loads its USB
-and serial-port libraries; the installer is built from it.
+machine): all the automated checks pass; the bundled XGecu helper starts
+and answers "No programmer found"; the bundled FFmpeg helper starts and
+decodes; the standalone program is built, opens its window, decodes a test
+signal, writes FLAC and MP3, and loads its USB and serial-port libraries;
+the installer is built from it.
 
 NOT tested with real hardware by the developer: reading through any
 programmer. Each reader (CH341A with WCH's driver, CH341A with WinUSB,
 CH347, FT232H, serprog boards, XGecu) was written from the published
 description of its commands and tested against a simulation of that
-device. The first read with a real programmer is the real test. Running
+device. For FT232H I2C that simulation works at the level of the two bus
+lines and a 24-series chip obeying the I2C rules. The first read with a real programmer is the real test. Running
 the installer, sound playback, the driver install and card reading have
 also not been exercised by the developer on a Windows desktop.
 
@@ -214,6 +249,16 @@ Decoders:
   words (over 99% found) and on random data. The synthesiser follows the
   documented chip behaviour; its output has been measured, not listened to.
   TMS5110 and TMC0281 data look the same, so try both if one sounds off.
+- Formats decoded by FFmpeg (0.6.0): tried on real files made by other
+  encoders for AAC, WMA 2 / Pro / Lossless, Speex, AMR-NB and AMR-WB, and
+  on files made by FFmpeg's own encoders for ADX, WMA 1, Apple Lossless,
+  Yamaha ADPCM, G.723.1 and G.726. Not tried on a real file: QCELP / EVRC,
+  EA ADPCM, Bink Audio, Creative ADPCM, WMA Voice, XWMA, BRSTM / BFSTM /
+  GENH.
+- SNES BRR, Yamaha ADPCM-A and Nintendo DSP ADPCM (0.6.0): each decoder
+  gives exactly the same samples as its reference implementation (Snes9x's
+  sound chip code, ymfm, vgmstream) on over a million samples of test data
+  covering every setting. Not tried on dumps of real cartridges or boards.
 
 Robustness (0.5.1): every entry of the Encoding list is tried on every
 kind of file (voice, random, tiny, one byte, blank, odd-sized, whole and
@@ -221,6 +266,10 @@ damaged audio files) in the automated checks; 840 deliberately corrupted
 audio files were decoded without a crash; decoders that work one sample at
 a time run in the background behind a progress window with Cancel; an
 error while decoding shows as a line under the headline.
+Robustness (0.6.0): the same sweep with every new kind of file; 1,440
+deliberately corrupted files of the new formats decoded without a crash,
+a hang or a temporary file left behind. If the FFmpeg helper is missing,
+fails or stalls, the app says so, stops it at a time limit, and carries on.
 
 If something fails: the installer names the step that stopped; the Read
 screen says what went wrong; and errors inside the app are written to
@@ -231,5 +280,7 @@ LICENCES
 --------
 See THIRD-PARTY.txt. In short: minipro (the XGecu helper program) is GNU
 GPL version 3 or later and runs as a separate program; its source is in
-tools\minipro-build. The sound-chip tables come from the MAME project
-(BSD 3-Clause). The other libraries are BSD, LGPL or Apache licensed.
+tools\minipro-build. FFmpeg (the audio helper program) is LGPL 2.1 or
+later, built with only audio decoders, and also runs as a separate
+program; tools\build-ffmpeg.sh builds it. The sound-chip tables come from
+the MAME project (BSD 3-Clause). The other libraries are BSD, LGPL or Apache licensed.

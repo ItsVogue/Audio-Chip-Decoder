@@ -9,6 +9,17 @@ minipro (audiochip\readers\xgecu\minipro.exe, infoic.xml, logicic.xml)
   Its licence is next to it; its source and build notes are in
   tools\minipro-build. The app runs it as a separate program.
 
+FFmpeg (audiochip\ffhelper\ffmpeg.exe)
+  Decodes AAC, WMA, AMR, Speex, QCELP, ADX, EA ADPCM, Bink Audio, Creative
+  ADPCM and the other formats listed in README.txt under "Through FFmpeg".
+  GNU Lesser General Public License, version 2.1 or later. This build has
+  only audio decoders and file readers switched on; no GPL or non-free
+  part of FFmpeg is included.
+  https://ffmpeg.org   source: https://github.com/FFmpeg/FFmpeg (tag n8.1.3)
+  Its licence and build notes are next to it (ffmpeg-LICENSE.txt, BUILD.txt)
+  and tools\build-ffmpeg.sh holds the exact build command, so you can
+  rebuild or replace it. The app runs it as a separate program.
+
 Libraries installed with the app
 --------------------------------
 NumPy                 BSD 3-Clause           https://numpy.org
@@ -57,6 +68,30 @@ of how the chips behave come from the MAME project:
   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
   POSSIBILITY OF SUCH DAMAGE.
 
+Console and arcade formats added in 0.6.0
+-----------------------------------------
+The decoders for SNES BRR, Yamaha ADPCM-A and Nintendo DSP ADPCM were written
+for this app from the published behaviour of those chips. Their output was
+compared, sample for sample, with these projects' own code, which is not
+included in the app:
+  SNES BRR         blargg's SPC_DSP as shipped in Snes9x (LGPL 2.1)
+                   https://github.com/snes9xgit/snes9x
+  Yamaha ADPCM-A   ymfm by Aaron Giles (BSD 3-Clause); the step table is the
+                   one in the chip, also listed in MAME
+                   https://github.com/aaronsgiles/ymfm
+  Nintendo DSP     vgmstream (ISC)   https://github.com/vgmstream/vgmstream
+The .dsp header checks follow vgmstream's. tests\data\reference holds inputs
+and the reference outputs they produced.
+
+Test files
+----------
+tests\data\ff\sample_nb.amr and sample_wb.amr come from the test assets of
+the Android media library (androidx/media), Apache License 2.0.
+https://github.com/androidx/media
+tone.spx and tone_wb.spx were made with libspeex (BSD); the other files in
+that folder were made with FFmpeg's encoders. None of them ship with the
+installed app.
+
 Programmer protocols
 --------------------
 No code was copied for these; the commands each device understands were taken
@@ -64,4 +99,5 @@ from the following published descriptions.
 CH341A, CH347     WCH's library headers CH341DLL_EN.H and CH347DLL_EN.H
 CH341A over USB   the command set documented in flashrom's ch341a_spi.c
 serprog           flashrom's serprog protocol specification
-FT232H            FTDI application note AN_108 (MPSSE command processor)
+FT232H            FTDI application notes AN_108 (MPSSE command processor)
+                  and AN_113 (I2C through MPSSE)

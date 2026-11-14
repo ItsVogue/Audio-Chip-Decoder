@@ -1,0 +1,22 @@
+ffmpeg.exe in this folder
+=========================
+
+This is FFmpeg n8.1.3 (https://ffmpeg.org, source: https://github.com/FFmpeg/FFmpeg,
+tag n8.1.3, commit 1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7), built with almost
+everything switched off: only the audio decoders and file readers that Audio Chip
+Decoder uses are included. No GPL or non-free parts are enabled, so it is covered
+by the GNU Lesser General Public License, version 2.1 or later (ffmpeg-LICENSE.txt).
+
+Audio Chip Decoder runs it as a separate program and never links to it.
+
+To build the same file yourself, on Linux with mingw-w64 and nasm installed:
+
+    tools/build-ffmpeg.sh win
+
+That script holds the exact configure line. Running "ffmpeg.exe -version" prints
+the configuration it was built with. You may replace ffmpeg.exe with your own
+build of FFmpeg, as the LGPL allows; the app only needs the decoders and readers
+listed in the script, WAV output, and the "file" and "pipe" protocols.
+
+Built with: x86_64-w64-mingw32-gcc 13 (static, Windows threads). It needs only
+Windows' own libraries (KERNEL32, msvcrt, bcrypt, SHELL32).

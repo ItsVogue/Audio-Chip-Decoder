@@ -56,6 +56,10 @@ WIRING = {
     "ft232h": ("<b>Wiring (port A):</b> AD0 to the chip's clock (pin 6 on 25-series), AD1 to its data in (pin 5), "
                "AD2 to its data out (pin 2), AD3 to chip select (pin 1). GND to pin 4, 3.3 V to pin 8, and tie "
                "the WP and HOLD pins (3 and 7) to 3.3 V."),
+    "ft232h_i2c": ("<b>Wiring for a 24-series chip (port A):</b> AD0 to the chip's SCL (pin 6). AD1 and AD2 "
+                   "joined together to SDA (pin 5), with a resistor of about 4.7 k from SDA to 3.3 V. GND to "
+                   "pins 1, 2, 3, 4 and 7, and 3.3 V to pin 8. Boards with an I2C switch (Adafruit's) join AD1 "
+                   "and AD2 and supply the resistor when the switch is on. This is different from the SPI wiring."),
     "serprog": ("<b>Firmware:</b> the board must be running serprog firmware (pico-serprog on a Pico, "
                 "frser-duino on an Arduino). The pin assignment is fixed by that firmware; its instructions "
                 "show which pin goes where."),
@@ -93,7 +97,7 @@ class ReadDialog(FitDialog):
         self.source.addItem("XGecu T48 / TL866II Plus / TL866A/CS  -  parallel EPROM and flash, and serial chips",
                             "xgecu")
         self.source.addItem("CH347 adapter  -  8-pin serial chips in SOIC-8 or DIP-8 (24, 25, 95 series, AT45)", "ch347")
-        self.source.addItem("FT232H / FT2232H board  -  SPI chips (25, 95 series, AT45), wired by hand", "ft232h")
+        self.source.addItem("FT232H / FT2232H board  -  SPI chips (25, 95 series, AT45) and 24-series I2C, wired by hand", "ft232h")
         self.source.addItem("Raspberry Pi Pico or Arduino with serprog firmware  -  SPI chips", "serprog")
         self.source.addItem("USB card reader  -  memory cards and USB drives", "card")
         self.source.setCurrentIndex(max(self.source.findData(settings.value("reader", "ch341a")), 0))
@@ -426,8 +430,7 @@ class ReadDialog(FitDialog):
             self._family_changed()
             self.detect_text.setText(DETECT_PROMPT[src])
             self.volt.setText(VOLTAGE_NOTE[src])
-            self.wiring.setText(WIRING[src])
-            self.wiring.setVisible(bool(WIRING[src]))
+            self._show_wiring()
         self.read_btn.setText("Read card" if src == "card" else "Read chip")
         self.verify.setEnabled(src != "card")
         self.number.setEnabled(src != "card")
@@ -602,7 +605,15 @@ class ReadDialog(FitDialog):
         self._run(lambda prog: install_driver(prog), done, "Downloading the driver from wch-ic.com...")
 
     # ------------------------------------------------------------------- chip
+    def _show_wiring(self) -> None:
+        src = self._src()
+        key = "ft232h_i2c" if src == "ft232h" and self.family.currentData() == "i2c_eeprom" else src
+        self.wiring.setText(WIRING.get(key, ""))
+        self.wiring.setVisible(bool(WIRING.get(key)))
+
     def _family_changed(self) -> None:
+        if hasattr(self, "wiring") and self._src() in SERIAL:
+            self._show_wiring()
         fam = self.family.currentData()
         self.variant.clear()
         if fam == "spi_flash":

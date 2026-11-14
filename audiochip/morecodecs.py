@@ -220,6 +220,9 @@ def _vag_render(b: np.ndarray) -> Rendered:
         data = data[48:]
     samples, spans = psx_decode(data)
     sounds = [Sound(a, e, f"Sound {i}") for i, (a, e) in enumerate(spans, 1) if e - a >= 28]
+    if len(sounds) > 1000 and len(samples) < 28 * 8 * len(sounds):
+        sounds = []                 # end flags on nearly every block: not real sounds, so no list of thousands
+        note += " End flags occur too often for real sounds, so the data is shown as one stream."
     return Rendered(samples, rate, sounds if len(sounds) > 1 else [], note)
 
 

@@ -391,7 +391,7 @@ def test_read_dialog_adapts_to_each_serial_reader(app, tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     d = ReadDialog(QSettings("AudioChipDecoder", "AudioChipDecoder"))
     d.show()
-    for kind, i2c in (("ch347", True), ("ft232h", False), ("serprog", False), ("ch341a", True)):
+    for kind, i2c in (("ch347", True), ("ft232h", True), ("serprog", False), ("ch341a", True)):
         d.source.setCurrentIndex(d.source.findData(kind))
         assert d._reader_ok and (d.family.findData("i2c_eeprom") >= 0) is i2c
         assert d.port.isVisible() is (kind == "serprog") and d.wiring.isVisible() is (kind in ("ft232h", "serprog"))
@@ -496,6 +496,12 @@ def test_chip_markings_and_packages_in_the_read_dialog(app, tmp_path, monkeypatc
     d.marking.setText("AT45DB041D")
     assert d._chosen_chip().family == "at45"
     d.source.setCurrentIndex(d.source.findData("ft232h"))
+    d.marking.setText("24C02")                                   # an FT232H reads I2C too, with its own wiring
+    assert d.family.currentData() == "i2c_eeprom" and "AD1 and AD2" in d.wiring.text() and "SDA" in d.wiring.text()
+    d.family.setCurrentIndex(d.family.findData("spi_flash"))
+    assert "chip select" in d.wiring.text() and "SDA" not in d.wiring.text()
+    d.source.setCurrentIndex(d.source.findData("serprog"))
+    d.marking.setText("")
     d.marking.setText("24C02")
     assert "SPI chips only" in d.hint.text()
     d.source.setCurrentIndex(d.source.findData("xgecu"))

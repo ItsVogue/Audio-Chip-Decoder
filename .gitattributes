@@ -1,0 +1,4 @@
+tests/data/** binary
+*.exe binary
+*.gz binary
+*.ico binary

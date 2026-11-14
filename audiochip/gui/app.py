@@ -88,8 +88,20 @@ def selftest(argv: list[str]) -> int:
             state = "helper program is Windows-only"
         return f"{len(hits)} chips match 27C256; {state}"
 
+    def ffmpeg():
+        import numpy as np
+        from .. import ffcodecs
+        if not ffcodecs.available():
+            raise RuntimeError("ffhelper/ffmpeg.exe is missing")
+        stream = (np.arange(4000) * 37 % 251).astype(np.uint8).tobytes()      # any bytes decode as G.726
+        x, rate, _ = ffcodecs.decode_file(stream, "g726_16")
+        if rate != 8000 or len(x) < 15000:
+            raise RuntimeError(f"unexpected result: {len(x)} samples at {rate} Hz")
+        return f"helper program ran and decoded {len(x):,} samples"
+
     for name, fn in (("window", window), ("decode", decode), ("flac and mp3", flac_mp3), ("usb", usb),
-                     ("gapless audio", live_audio), ("serial ports", serial_ports), ("xgecu helper", minipro)):
+                     ("gapless audio", live_audio), ("serial ports", serial_ports), ("xgecu helper", minipro),
+                     ("ffmpeg helper", ffmpeg)):
         step(name, fn)
     try:
         with open(report, "w", encoding="utf-8") as f:

@@ -345,6 +345,79 @@ def test_simulated_reader_of_each_kind_opens(tmp_path, monkeypatch):
     f = tmp_path / "chip.bin"
     f.write_bytes(bytes(range(256)) * 256)
     monkeypatch.setenv("AUDIOCHIP_SIM", str(f))
-    for kind, i2c in (("ch341a", True), ("ch347", True), ("ft232h", False), ("serprog", False)):
+    for kind, i2c in (("ch341a", True), ("ch347", True), ("ft232h", True), ("serprog", False)):
         with _open_reader(kind) as r:
             assert r.has_i2c is i2c and r.identify().size == 65536
+
+
+# ------------------------------------------------------------ FT232H: 24-series I2C
+def _ftdi_on_sim(sim, kind="FT232H"):
+    """An FT232H transport whose USB writes go to the pin-level simulator instead of FTDI's driver."""
+    from audiochip.readers.ft232h import FtdiTransport
+    t = object.__new__(FtdiTransport)
+    t.kind, t.open, t._back = kind, False, bytearray()
+    t._write = lambda data: t._back.extend(sim.run(data))
+
+    def read(n):
+        from audiochip.readers.base import ReaderError
+        if len(t._back) < n:
+            raise ReaderError("short read")
+        got = bytes(t._back[:n])
+        del t._back[:n]
+        return got
+    t._read = read
+    return t
+
+
+@pytest.mark.parametrize("type_index, size, addr_bytes", [(1, 256, 1), (2, 512, 1), (4, 2048, 1), (5, 4096, 2),
+                                                          (8, 32768, 2), (10, 131072, 2)])
+@pytest.mark.parametrize("kind", ["FT232H", "FT2232H"])
+def test_ft232h_reads_24_series_chips_over_a_simulated_i2c_bus(type_index, size, addr_bytes, kind):
+    from mpsse_i2c_sim import MpsseI2cSim
+    from audiochip.readers.chips import I2C_TYPES, i2c_chip
+    from audiochip.readers.spi import SerialReader
+    assert I2C_TYPES[type_index][1] == size
+    rng = np.random.default_rng(size)
+    mem = rng.integers(0, 256, size, dtype=np.uint8).tobytes()
+    sim = MpsseI2cSim(mem, addr_bytes, open_drain_capable=kind == "FT232H")
+    reader = SerialReader(_ftdi_on_sim(sim, kind))
+    assert reader.has_i2c
+    assert reader.read(i2c_chip(type_index)) == mem
+    assert sim.writes == 0, "a data byte was written to the chip"
+    assert sim.contention == 0 and sim.hazards == 0 and not sim.unknown
+    assert sim.three_phase is False and sim.divisor == 14, "the port must be left set up for SPI afterwards"
+    reads = -(-size // 64)
+    assert sim.starts == 2 * reads                                  # each read: a start and a repeated start
+    assert sim.stops >= reads
+
+
+def test_ft232h_i2c_runs_at_100_khz_with_three_phase_clocking():
+    from audiochip.readers.ft232h import I2C_DIVISOR, i2c_address, i2c_read_commands, i2c_setup
+    assert 60e6 / ((1 + I2C_DIVISOR) * 2) * 2 / 3 == 100e3
+    setup = i2c_setup(True)
+    assert setup[:3] == bytes([0x8A, 0x97, 0x8C]) and bytes([0x9E, 0x06, 0x00]) in setup
+    assert len(i2c_setup(False)) == len(setup) - 3 and i2c_setup(False)[:7] == setup[:7]
+    assert i2c_address(1, 0x12) == (0x50, b"\x12")                 # 24C02
+    assert i2c_address(4, 0x712) == (0x57, b"\x12")                # 24C16: block bits in the device address
+    assert i2c_address(8, 0x7123) == (0x50, b"\x71\x23")           # 24C256
+    assert i2c_address(10, 0x1ABCD) == (0x51, b"\xAB\xCD")         # 24C1024: bit 16 in the device address
+    cmds, sent = i2c_read_commands(8, 0x0100, 4)
+    assert sent == 4 and cmds.endswith(b"\x87")
+    assert cmds.count(bytes([0x20, 0x00, 0x00])) == 4               # four data bytes clocked in
+    assert bytes([0x13, 0x00, 0x80]) in cmds                        # the last one is not acknowledged
+
+
+def test_ft232h_i2c_reports_a_missing_chip_and_restores_spi_mode():
+    from mpsse_i2c_sim import MpsseI2cSim
+    from audiochip.readers.base import ReaderError
+    from audiochip.readers.chips import i2c_chip
+    from audiochip.readers.spi import SerialReader
+
+    class Nothing(MpsseI2cSim):
+        def _byte(self, value):
+            return False                                            # nobody acknowledges
+
+    sim = Nothing(bytes(256), 1)
+    with pytest.raises(ReaderError, match="No chip answered"):
+        SerialReader(_ftdi_on_sim(sim)).read(i2c_chip(1))
+    assert sim.three_phase is False and sim.divisor == 14 and sim.writes == 0

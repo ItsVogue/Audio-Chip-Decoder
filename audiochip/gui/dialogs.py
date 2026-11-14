@@ -568,8 +568,9 @@ export audio files. You can also drop files or folders onto the window, or reope
     <td>The faster relative of the CH341A, for the same 8-pin chips. Uses the same WCH driver. Its mode
         jumper must select SPI/I2C.</td></tr>
 <tr><td><b>FT232H / FT2232H board</b></td>
-    <td>Reads SPI chips wired to port A (AD0 clock, AD1 to chip, AD2 from chip, AD3 select). Uses FTDI's
-        driver, which Windows normally installs by itself.</td></tr>
+    <td>Reads SPI chips wired to port A (AD0 clock, AD1 to chip, AD2 from chip, AD3 select), and 24-series
+        I2C chips (AD0 to SCL, AD1 and AD2 joined to SDA with a 4.7 k resistor to 3.3 V). The Read screen
+        shows the wiring for the family chosen. Uses FTDI's driver, which Windows normally installs by itself.</td></tr>
 <tr><td><b>Raspberry Pi Pico or Arduino</b></td>
     <td>Reads SPI chips if the board runs serprog firmware (pico-serprog, frser-duino). Pick its COM port.</td></tr>
 <tr><td><b>USB card reader</b></td>
