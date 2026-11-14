@@ -1,0 +1,46 @@
+name: Move release tags
+on:
+  push:
+    branches: [retag]
+permissions:
+  contents: write
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Move tags to the matching commits on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --force --tags origin
+          git fetch origin main
+          fail=0
+          while read tag new; do
+            [ -z "$tag" ] && continue
+            old=$(git rev-parse "refs/tags/$tag^{commit}")
+            new=$(git rev-parse "$new^{commit}")
+            if [ "$(git rev-parse "$old^{tree}")" != "$(git rev-parse "$new^{tree}")" ]; then
+              echo "$tag: contents differ, left alone"; fail=1; continue
+            fi
+            if ! git merge-base --is-ancestor "$new" origin/main; then
+              echo "$tag: target is not on main, left alone"; fail=1; continue
+            fi
+            if [ "$old" = "$new" ]; then echo "$tag: already moved"; continue; fi
+            if gh api -X PATCH "repos/${{ github.repository }}/git/refs/tags/$tag" -f sha="$new" -F force=true --silent; then
+              echo "$tag: moved to $new"
+            else
+              echo "$tag: could not be moved"; fail=1
+            fi
+          done <<'LIST'
+          v0.4.0 e394a761
+          v0.4.1 a70891de
+          v0.4.2 72f7f8fe
+          v0.4.3 be991bc4
+          v0.4.4 0293c33f
+          v0.5.0 267c4d83
+          v0.5.1 96e19519
+          LIST
+          exit $fail
