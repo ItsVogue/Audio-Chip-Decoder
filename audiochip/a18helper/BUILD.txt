@@ -1,0 +1,13 @@
+a1800.exe in this folder
+========================
+
+This is a1800_codec 1.1.0, an open-source implementation of the GeneralPlus
+A1800 audio codec by John-K (https://github.com/John-K/a1800_codec, commit
+c32c383e2285825eca3f2a0cf4f41d607392ab24), built unchanged as a Windows
+program. It is covered by the Apache License, Version 2.0 (LICENSE.txt).
+
+Audio Chip Decoder runs it as a separate program:
+    a1800.exe decode clip.a18 clip.wav
+
+To build the same file yourself: tools/build-a1800.sh (Rust and mingw-w64).
+It needs only Windows' own libraries.

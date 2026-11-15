@@ -698,3 +698,7 @@ from . import consolecodecs as _console, ffcodecs as _ff  # noqa: E402
 
 _ff.register(CODECS, RENDERERS, Codec, _COST)
 _console.register(CODECS, RENDERERS, Codec, _COST)
+
+from . import a1800 as _a1800  # noqa: E402
+
+_a1800.register(CODECS, RENDERERS, Codec, _COST)

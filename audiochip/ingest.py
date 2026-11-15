@@ -11,7 +11,7 @@ SREC_EXT = {".s19", ".s28", ".s37", ".srec", ".mot", ".s", ".sx", ".s1", ".s2", 
 AUDIO_EXT = {".wav", ".flac", ".ogg", ".oga", ".opus", ".mp3", ".aif", ".aiff", ".aifc", ".au", ".snd", ".caf",
              ".voc", ".w64", ".vag", ".vox", ".gsm", ".g721", ".g723", ".g726", ".pcm",
              ".aac", ".adts", ".m4a", ".m4b", ".mp4", ".3gp", ".3g2", ".wma", ".asf", ".xwm", ".xwma", ".amr", ".awb",
-             ".spx", ".qcp", ".adx", ".bik", ".bk2", ".binka", ".brstm", ".bfstm", ".genh", ".dsp", ".brr"}
+             ".spx", ".qcp", ".adx", ".bik", ".bk2", ".binka", ".brstm", ".bfstm", ".genh", ".dsp", ".brr", ".a18"}
 # all of the above are read as raw bytes
 DUMP_EXT = RAW_EXT | HEX_EXT | SREC_EXT | AUDIO_EXT
 

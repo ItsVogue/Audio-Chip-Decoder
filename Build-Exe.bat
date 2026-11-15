@@ -16,6 +16,7 @@ if errorlevel 1 goto fail
   --icon "%~dp0audiochip\gui\icon.ico" --add-data "%~dp0audiochip\gui\icon.ico;audiochip\gui" ^
   --add-data "%~dp0audiochip\readers\xgecu;audiochip\readers\xgecu" ^
   --add-data "%~dp0audiochip\ffhelper;audiochip\ffhelper" ^
+  --add-data "%~dp0audiochip\a18helper;audiochip\a18helper" ^
   --collect-all libusb_package --collect-all soundfile --collect-all sounddevice --hidden-import serial.tools.list_ports_windows ^
   --paths "%~dp0." --distpath "%~dp0dist" --workpath "%TEMP%\audiochip_build" --specpath "%TEMP%\audiochip_build" ^
   "%~dp0tools\launch.py"

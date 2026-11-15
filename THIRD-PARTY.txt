@@ -20,6 +20,13 @@ FFmpeg (audiochip\ffhelper\ffmpeg.exe)
   and tools\build-ffmpeg.sh holds the exact build command, so you can
   rebuild or replace it. The app runs it as a separate program.
 
+a1800_codec (audiochip\a18helper\a1800.exe)
+  Decodes GeneralPlus A1800 audio. An open-source implementation by John-K,
+  version 1.1.0, built unchanged. Apache License, Version 2.0 (the licence
+  and build notes are next to it; tools\build-a1800.sh builds it).
+  https://github.com/John-K/a1800_codec
+  The app runs it as a separate program.
+
 Libraries installed with the app
 --------------------------------
 NumPy                 BSD 3-Clause           https://numpy.org

@@ -344,6 +344,8 @@ def detect(data: bytes, st: Structure) -> Detection:
     from . import consolecodecs, ffcodecs
     cands += ffcodecs.extra_candidates(data, Candidate, Hypothesis, _NOT_THIS)
     cands += consolecodecs.extra_candidates(data, Candidate, Hypothesis, _NOT_THIS)
+    from . import a1800
+    cands += a1800.extra_candidates(data, Candidate, Hypothesis, _NOT_THIS)
     cands.sort(key=lambda c: c.score)
     det.candidates = cands
     conf, reason = _judge(cands)

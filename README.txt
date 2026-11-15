@@ -1,4 +1,4 @@
-AUDIO CHIP DECODER 0.6.0
+AUDIO CHIP DECODER 0.6.1
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports audio files.
@@ -171,6 +171,10 @@ Also opens:      Ordinary audio files: WAV (PCM 8/16/24/32-bit, Microsoft
                    G.729, TrueSpeech, Apple Lossless...). These files are
                    also found when they sit inside a larger dump: each one
                    becomes a sound in the list.
+                 GeneralPlus A1800, the codec of many talking toys: clips
+                   stored in a flash dump as FF 40/42 00 E0 2E containers
+                   (as in Fisher-Price Little People toys), and .a18 files.
+                   Each clip becomes a sound in the list, at 16,000 Hz.
                  AMR-NB frames stored without a file header (recognised by
                    the unbroken chain of frame headers).
                  SNES BRR sample files (.brr, with or without the 2-byte
@@ -214,6 +218,8 @@ NOT COVERED
   XWMA, BRSTM / BFSTM / GENH. FFmpeg's own decoders handle them; if one
   fails, the app says so and nothing else is affected.
 - Two-channel .dsp variants and ADX files that are encrypted.
+- Other GeneralPlus / Sunplus codecs (S480, S530, S720, A1600, A3600...)
+  and A1800 containers with a different header than the one above.
 - Generalplus / Sunplus speech (GPDS, unSP, A1600, A1800 and relatives):
   no published, verified decoder is built in. Frames of these formats are
   detected and reported (size and marker bytes) but not decoded.
@@ -255,6 +261,11 @@ Decoders:
   Yamaha ADPCM, G.723.1 and G.726. Not tried on a real file: QCELP / EVRC,
   EA ADPCM, Bink Audio, Creative ADPCM, WMA Voice, XWMA, BRSTM / BFSTM /
   GENH.
+- GeneralPlus A1800 (0.6.1): the decoder is the open-source a1800_codec.
+  Its output was checked against audio made by a second, independently
+  written A1800 encoder (clean match, exact 320-sample delay). The
+  container search follows a write-up of a real Fisher-Price flash dump
+  that held 164 clips; it has not yet been run on that dump itself.
 - SNES BRR, Yamaha ADPCM-A and Nintendo DSP ADPCM (0.6.0): each decoder
   gives exactly the same samples as its reference implementation (Snes9x's
   sound chip code, ymfm, vgmstream) on over a million samples of test data
@@ -282,5 +293,6 @@ See THIRD-PARTY.txt. In short: minipro (the XGecu helper program) is GNU
 GPL version 3 or later and runs as a separate program; its source is in
 tools\minipro-build. FFmpeg (the audio helper program) is LGPL 2.1 or
 later, built with only audio decoders, and also runs as a separate
-program; tools\build-ffmpeg.sh builds it. The sound-chip tables come from
+program; tools\build-ffmpeg.sh builds it. a1800_codec (the A1800 helper
+program) is Apache License 2.0; tools\build-a1800.sh builds it. The sound-chip tables come from
 the MAME project (BSD 3-Clause). The other libraries are BSD, LGPL or Apache licensed.

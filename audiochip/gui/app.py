@@ -88,6 +88,19 @@ def selftest(argv: list[str]) -> int:
             state = "helper program is Windows-only"
         return f"{len(hits)} chips match 27C256; {state}"
 
+    def a1800_helper():
+        from .. import a1800
+        if not a1800.available():
+            raise RuntimeError("a18helper/a1800.exe is missing")
+        frames = bytes.fromhex(
+            "83ca930719acfb47035169a7920c6f4ec79e972b3f2e8926c17092e6138dd96ac9db00f800000000"
+            "83c2a71f5458f9e7d5536ab3f6427390077ff005cf5eff50dbc197c928c900000000000000000000"
+            "c5cc040f8f65fc9fd44bb0b76885f9a49b924060af646096acb7989fff843c300000000000000000")
+        x = a1800.decode_frames(frames)
+        if len(x) != 960:
+            raise RuntimeError(f"unexpected result: {len(x)} samples")
+        return f"helper program ran and decoded {len(x):,} samples"
+
     def ffmpeg():
         import numpy as np
         from .. import ffcodecs
@@ -101,7 +114,7 @@ def selftest(argv: list[str]) -> int:
 
     for name, fn in (("window", window), ("decode", decode), ("flac and mp3", flac_mp3), ("usb", usb),
                      ("gapless audio", live_audio), ("serial ports", serial_ports), ("xgecu helper", minipro),
-                     ("ffmpeg helper", ffmpeg)):
+                     ("ffmpeg helper", ffmpeg), ("a1800 helper", a1800_helper)):
         step(name, fn)
     try:
         with open(report, "w", encoding="utf-8") as f:

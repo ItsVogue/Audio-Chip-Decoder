@@ -81,6 +81,7 @@ jobs:
           --add-data "audiochip/gui/icon.ico;audiochip/gui"
           --add-data "audiochip/readers/xgecu;audiochip/readers/xgecu"
           --add-data "audiochip/ffhelper;audiochip/ffhelper"
+          --add-data "audiochip/a18helper;audiochip/a18helper"
           --collect-all libusb_package
           --collect-all soundfile
           --collect-all sounddevice
