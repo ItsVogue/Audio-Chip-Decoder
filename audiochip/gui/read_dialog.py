@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Read a chip or a memory card from inside the app."""
 from __future__ import annotations
 

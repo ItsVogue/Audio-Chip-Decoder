@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Decoders: turn stored bytes into 16-bit audio samples.
 
 Every decoder is registered in CODECS with a plain-language description and

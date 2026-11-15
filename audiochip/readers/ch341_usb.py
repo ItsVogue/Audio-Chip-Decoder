@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """CH341A through a generic USB driver (WinUSB or libusb), for PCs where WCH's driver is not the one bound.
 
 Tools such as Zadig replace WCH's driver with WinUSB so that flashrom can use the programmer.

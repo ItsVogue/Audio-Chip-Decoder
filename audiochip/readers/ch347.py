@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """WCH CH347 high-speed USB adapter: 25-series SPI and 24-series I2C chips. Read-only.
 
 Uses WCH's library (CH347DLLA64.DLL, installed with WCH's CH347 driver, CH341PAR.EXE).

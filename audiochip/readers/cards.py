@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Memory cards and USB drives: read the raw contents through a card reader. Read-only."""
 from __future__ import annotations
 

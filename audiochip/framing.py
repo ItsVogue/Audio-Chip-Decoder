@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Spot compressed audio stored in fixed-size frames, even when the codec itself is unknown.
 
 Many speech chips and toy sound modules store sound as frames of equal length, each starting

@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Audio playback.
 
 On Windows this uses the built-in winsound module, so nothing extra has to

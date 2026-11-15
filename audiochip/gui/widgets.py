@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Drawing widgets: waveform, spectrogram, confidence chip."""
 from __future__ import annotations
 

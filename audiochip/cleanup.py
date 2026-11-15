@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Optional clean-up applied on export. Off by default: the plain export is the chip's exact output.
 
 * Offset and rumble: old 8-bit chips often sit off-centre; a gentle high-pass removes that.

@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Command-line front end: the same engine as the desktop app, for batch work."""
 from __future__ import annotations
 

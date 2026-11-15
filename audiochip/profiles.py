@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Device profiles: a confirmed reading and speed for one kind of equipment.
 
 Once one chip from a machine has been decoded and confirmed by ear, the

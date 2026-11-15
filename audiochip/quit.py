@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Stop the process at once, without running any shutdown code.
 
 Used when the app's window has closed and when a test run has reported its results.

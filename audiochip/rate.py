@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Shortlist the playback speed (sample rate).
 
 The speed is not stored in a dump, so it cannot be read back. What can be

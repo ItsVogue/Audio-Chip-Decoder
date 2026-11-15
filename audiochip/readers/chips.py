@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """What the app knows about serial memory chips."""
 from __future__ import annotations
 

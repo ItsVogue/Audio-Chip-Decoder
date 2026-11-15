@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Run slow jobs off the UI thread."""
 from __future__ import annotations
 

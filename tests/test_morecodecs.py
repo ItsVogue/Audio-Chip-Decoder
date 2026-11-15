@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Codecs added in 0.5.0. The original decoders are covered by the other test files, unchanged."""
 import io
 import struct

@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """XGecu universal programmers: TL866A/CS, TL866II Plus and T48. Read-only.
 
 These read 24/28/32/40-pin parallel EPROMs and flash as well as serial chips.

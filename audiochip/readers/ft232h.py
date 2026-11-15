@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """FTDI FT232H / FT2232H / FT4232H breakout boards: SPI chips and 24-series I2C EEPROMs. Read-only.
 
 Uses FTDI's own library (ftd2xx.dll, installed with FTDI's driver, which Windows Update

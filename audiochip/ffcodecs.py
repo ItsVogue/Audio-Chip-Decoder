@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Audio formats decoded by FFmpeg, added alongside the existing decoders without changing them.
 
 The app ships a small FFmpeg (audiochip/ffhelper, built by tools/build-ffmpeg.sh with only

@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """SNES BRR, Yamaha ADPCM-A and Nintendo DSP ADPCM.
 
 tests/data/reference holds inputs together with the output of each format's reference

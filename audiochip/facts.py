@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Facts about the selected file or track, for the "About this selection" box."""
 from __future__ import annotations
 

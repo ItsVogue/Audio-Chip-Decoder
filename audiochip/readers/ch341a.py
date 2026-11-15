@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """CH341A USB programmer: 25-series SPI and 24-series I2C chips. Read-only.
 
 Talks to the programmer through WCH's own library (CH341DLLA64.DLL), which is

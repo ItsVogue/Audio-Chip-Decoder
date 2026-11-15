@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Raspberry Pi Pico, Arduino and other boards running "serprog" firmware: SPI chips. Read-only.
 
 serprog is flashrom's serial programmer protocol (pico-serprog, frser-duino, stm32-vserprog

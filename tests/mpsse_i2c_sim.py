@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """A pin-level stand-in for an FT232H in MPSSE mode with a 24-series I2C EEPROM wired to it.
 
 It executes the MPSSE command bytes the reader sends (pin sets, clocked bytes and bits), moves

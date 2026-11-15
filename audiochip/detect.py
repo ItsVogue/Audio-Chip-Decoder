@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Work out how audio is stored in a dump.
 
 Method: decode the bytes under every plausible reading (a "hypothesis"),

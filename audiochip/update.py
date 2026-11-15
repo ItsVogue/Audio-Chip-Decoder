@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Check whether a newer version has been published.
 
 Asks GitHub for the latest release of the project, at most once a day, and

@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Split decoded audio into the separate sounds a chip holds.
 
 Voice chips usually store many short clips. Two ways to find them:

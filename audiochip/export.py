@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Write audio files and a report that records exactly how they were made."""
 from __future__ import annotations
 

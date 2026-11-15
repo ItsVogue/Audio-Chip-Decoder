@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Group dumps into tracks, put chips in order, and hold the decode settings.
 
 A collection is everything the user opened. Each folder is one track; the

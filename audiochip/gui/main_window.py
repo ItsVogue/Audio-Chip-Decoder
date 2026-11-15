@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Main window: collection on the left, analysis in the middle, details on the right."""
 from __future__ import annotations
 

@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Additional codecs, added alongside the original ones without changing them.
 
 Everything here is registered into the existing codec table by `register()`; the decoders

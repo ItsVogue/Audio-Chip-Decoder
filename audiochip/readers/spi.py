@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Reading serial memory chips through any programmer that can do an SPI transfer. Read-only.
 
 A programmer is represented by a small "transport" object:

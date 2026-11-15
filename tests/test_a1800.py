@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """GeneralPlus A1800: toy flash containers and .a18 files, decoded by the bundled helper.
 
 tests/data/a1800/toy_rom.bin is a small made-up flash image: three clips (440, 880 and 660 Hz

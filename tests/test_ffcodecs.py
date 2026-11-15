@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Formats decoded through the bundled FFmpeg helper.
 
 tests/data/ff holds one-second files of a 440 Hz tone made with encoders other than the

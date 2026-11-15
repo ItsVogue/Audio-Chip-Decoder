@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Look at a dump before decoding: padding, markers, repeats, embedded files."""
 from __future__ import annotations
 

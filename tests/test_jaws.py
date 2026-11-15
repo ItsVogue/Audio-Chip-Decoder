@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Regression against the real Jaws 93 EPROM set and the WAV hashes from the original conversion.
 
 Skipped unless AUDIOCHIP_JAWS_DIR (the extracted archive) and AUDIOCHIP_JAWS_MANIFEST are set.

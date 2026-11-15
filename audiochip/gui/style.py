@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Application look: dark theme only."""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPalette

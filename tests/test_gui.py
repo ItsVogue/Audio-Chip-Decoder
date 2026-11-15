@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Drive the desktop app without a screen: open a folder, change settings, export."""
 import json
 import os

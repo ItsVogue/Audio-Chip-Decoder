@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Three console and arcade sound-chip formats, added alongside the existing decoders.
 
 Each decoder here was written for this app from the published behaviour of the chip, and its

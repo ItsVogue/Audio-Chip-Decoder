@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Stands in for minipro in tests: a pretend XGecu programmer holding the bytes in FAKE_MINIPRO_DATA."""
 import os
 import sys

@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """GeneralPlus A1800 audio, added alongside the existing decoders without changing them.
 
 A1800 is the speech and music codec of many GeneralPlus-based toys: 320 samples (20 ms at

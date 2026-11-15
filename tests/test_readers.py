@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Chip reading, exercised against a simulated programmer and chip."""
 import numpy as np
 import pytest

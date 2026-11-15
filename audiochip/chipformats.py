@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Sound-chip formats that are more than a plain stream of samples.
 
 Some voice chips store an index of sounds, a command stream, or parameters for

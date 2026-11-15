@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Load chip dumps: raw binary, Intel HEX and Motorola S-record."""
 from __future__ import annotations
 

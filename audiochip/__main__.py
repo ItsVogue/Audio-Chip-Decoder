@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """`python -m audiochip` starts the desktop app; with arguments it runs the command line."""
 import sys
 

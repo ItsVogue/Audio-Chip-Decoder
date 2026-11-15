@@ -1,3 +1,4 @@
+# Audio Chip Decoder. Copyright (c) 2026 ItsVogue. All rights reserved.
 """Coefficient tables of TI LPC speech chips.
 
 These are the constants stored inside the chips. The values were transcribed from the
