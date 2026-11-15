@@ -1,0 +1,63 @@
+Audio Chip Decoder
+Copyright (c) 2026 ItsVogue. All rights reserved.
+
+================================================================================
+PROPRIETARY LICENCE
+================================================================================
+
+This repository and its source code ("the Software") are made publicly
+viewable for reference only. They are not open source.
+
+The Software is the property of the copyright holder. Being able to view or
+download it here gives you no right to use it beyond what this licence allows.
+
+You MAY:
+
+  - View and read the source code.
+  - Download and run the released installer of the Software for your own
+    personal use.
+
+You MAY NOT, without the prior written permission of the copyright holder:
+
+  - Copy, reproduce, or republish the source code, in whole or in part.
+  - Modify the Software or create derivative works based on it.
+  - Redistribute, share, sublicense, rent, lease, or sell the Software or any
+    part of it, whether modified or not.
+  - Use the source code, or any portion of it, in another program or product.
+  - Use the Software or its source code for any commercial purpose.
+
+Viewing the code on a public site such as GitHub, or forking it within that
+site's own interface where the site's terms allow, does not grant any of the
+rights withheld above.
+
+--------------------------------------------------------------------------------
+Bundled third-party components
+--------------------------------------------------------------------------------
+
+This licence covers the original work of the copyright holder only. The
+Software ships several independent programs and data files that are the work of
+others and are covered by their own, separate licences, NOT by this one. They
+remain under their original terms, which permit their redistribution:
+
+  - minipro (XGecu helper) -- GNU GPL v3 or later
+  - FFmpeg (audio helper)  -- GNU LGPL v2.1 or later
+  - a1800_codec (A1800 helper) -- Apache License 2.0
+  - sound-chip tables from the MAME project -- BSD 3-Clause
+
+Full details and links are in THIRD-PARTY.txt and in the licence files that sit
+next to each component. Nothing in this licence removes or limits any right
+granted to you by those components' own licences.
+
+--------------------------------------------------------------------------------
+No warranty
+--------------------------------------------------------------------------------
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+To request permission for any use not allowed above, contact the copyright
+holder through the GitHub repository.

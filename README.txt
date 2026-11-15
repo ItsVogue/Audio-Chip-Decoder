@@ -287,7 +287,14 @@ screen says what went wrong; and errors inside the app are written to
 %APPDATA%\AudioChipDecoder\error.log
 
 
-LICENCES
+THIS PROGRAM'S LICENCE
+
+This program's own code is all rights reserved: shown publicly for reference
+only, not open source. You may run the installer, but not copy, change,
+redistribute or sell the code without permission. See LICENSE.txt. The bundled
+helper programs below keep their own open-source licences.
+
+THIRD-PARTY LICENCES
 --------
 See THIRD-PARTY.txt. In short: minipro (the XGecu helper program) is GNU
 GPL version 3 or later and runs as a separate program; its source is in
