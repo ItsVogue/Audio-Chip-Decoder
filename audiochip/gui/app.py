@@ -113,7 +113,15 @@ def selftest(argv: list[str]) -> int:
             raise RuntimeError(f"unexpected result: {len(x)} samples at {rate} Hz")
         return f"helper program ran and decoded {len(x):,} samples"
 
-    for name, fn in (("window", window), ("decode", decode), ("flac and mp3", flac_mp3), ("usb", usb),
+    def cpu():
+        from ..readers.ch341a import _windows_signals, driver_route, native_arch
+        arch = native_arch()
+        clues = _windows_signals() if sys.platform == "win32" else {}
+        if sys.platform == "win32" and (arch == "unknown" or "reg_arch" not in clues):
+            raise RuntimeError(f"could not tell the CPU type: {clues}")
+        return f"{arch}, CH341A driver route: {driver_route('ch341a')}, clues: {clues}"
+
+    for name, fn in (("cpu", cpu), ("window", window), ("decode", decode), ("flac and mp3", flac_mp3), ("usb", usb),
                      ("gapless audio", live_audio), ("serial ports", serial_ports), ("xgecu helper", minipro),
                      ("ffmpeg helper", ffmpeg), ("a1800 helper", a1800_helper)):
         step(name, fn)

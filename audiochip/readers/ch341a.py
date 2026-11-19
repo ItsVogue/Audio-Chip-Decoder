@@ -48,26 +48,84 @@ WINUSB_STEPS = (
 )
 
 
+def _windows_signals() -> dict:
+    """Every independent clue Windows gives about the real CPU. Each may be missing; none may raise."""
+    out: dict = {}
+    try:                                          # Windows 11: can this PC run ARM64 code natively?
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        fn = k.GetMachineTypeAttributes
+        fn.argtypes = [ctypes.c_ushort, ctypes.POINTER(ctypes.c_int)]
+        fn.restype = ctypes.c_long
+        attrs = ctypes.c_int(0)
+        if fn(0xAA64, ctypes.byref(attrs)) == 0:
+            out["arm64_attrs"] = attrs.value
+    except Exception:
+        pass
+    try:                                          # the registry keeps the true values; the environment of an
+        import winreg                             # emulated x64 program is rewritten to say AMD64
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+            out["reg_arch"] = str(winreg.QueryValueEx(key, "PROCESSOR_ARCHITECTURE")[0])
+    except Exception:
+        pass
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+            for name in ("Identifier", "ProcessorNameString"):
+                try:
+                    out[name] = str(winreg.QueryValueEx(key, name)[0])
+                except OSError:
+                    pass
+    except Exception:
+        pass
+    try:
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.GetCurrentProcess.restype = ctypes.c_void_p
+        fn = k.IsWow64Process2
+        fn.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ushort), ctypes.POINTER(ctypes.c_ushort)]
+        fn.restype = ctypes.c_int
+        proc, native = ctypes.c_ushort(0), ctypes.c_ushort(0)
+        if fn(k.GetCurrentProcess(), ctypes.byref(proc), ctypes.byref(native)):
+            out["wow_native"] = native.value
+    except Exception:
+        pass
+    out["env"] = os.environ.get("PROCESSOR_ARCHITEW6432") or os.environ.get("PROCESSOR_ARCHITECTURE") or ""
+    return out
+
+
+def arch_from_signals(sig: dict) -> str:
+    """Decide the CPU family from the clues. Any one clear sign of ARM wins.
+
+    An x64 program running under emulation on an ARM PC is told 'AMD64' by the environment and by
+    IsWow64Process2, so those two can only confirm ARM, never rule it out.
+    """
+    ident = (sig.get("Identifier", "") + " " + sig.get("ProcessorNameString", "")).upper()
+    arm = (sig.get("arm64_attrs", 0) != 0
+           or sig.get("reg_arch", "").upper() == "ARM64"
+           or ident.startswith("ARM") or "SNAPDRAGON" in ident or " ARMV8" in ident
+           or sig.get("wow_native") == 0xAA64
+           or sig.get("env", "").upper() == "ARM64")
+    if arm:
+        return "arm64"
+    known = {"AMD64": "amd64", "X86": "x86"}
+    for value in (sig.get("reg_arch", ""), sig.get("env", "")):
+        if value.upper() in known:
+            return known[value.upper()]
+    return {0x8664: "amd64", 0x014C: "x86"}.get(sig.get("wow_native"), "unknown")
+
+
 def native_arch() -> str:
     """The PC's real CPU family: 'arm64', 'amd64', 'x86' or 'unknown'.
 
-    On an ARM PC the app itself may be the x64 build running under emulation, so plain
-    platform checks report 'amd64'. IsWow64Process2 reports the true native machine.
-    AUDIOCHIP_ARCH overrides it, for testing and as an escape hatch.
+    On an ARM PC the app is the x64 build running under emulation, and Windows then answers the
+    usual questions with 'AMD64'. So several independent clues are read (see _windows_signals).
+    AUDIOCHIP_ARCH overrides the result, for testing and as an escape hatch.
     """
     forced = os.environ.get("AUDIOCHIP_ARCH")
     if forced:
         return forced.lower()
     if sys.platform == "win32":
-        try:
-            k = ctypes.windll.kernel32
-            proc, native = ctypes.c_ushort(0), ctypes.c_ushort(0)
-            if k.IsWow64Process2(k.GetCurrentProcess(), ctypes.byref(proc), ctypes.byref(native)):
-                return {0xAA64: "arm64", 0x8664: "amd64", 0x014C: "x86"}.get(native.value, "unknown")
-        except Exception:
-            pass
-        env = (os.environ.get("PROCESSOR_ARCHITEW6432") or os.environ.get("PROCESSOR_ARCHITECTURE") or "").upper()
-        return {"ARM64": "arm64", "AMD64": "amd64", "X86": "x86"}.get(env, "unknown")
+        return arch_from_signals(_windows_signals())
     import platform
     m = platform.machine().lower()
     return {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64", "amd64": "amd64"}.get(m, m or "unknown")

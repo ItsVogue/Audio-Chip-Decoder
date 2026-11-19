@@ -446,3 +446,21 @@ def test_native_arch_reads_the_override(monkeypatch):
     for value, expect in (("arm64", "arm64"), ("amd64", "amd64"), ("x86", "x86")):
         monkeypatch.setenv("AUDIOCHIP_ARCH", value)
         assert ch341a.native_arch() == expect
+
+
+def test_arm_is_recognised_even_when_windows_says_amd64_to_an_emulated_program():
+    # What an x64 program sees on a Surface Pro 11 (ARM): the environment and IsWow64Process2 both
+    # say AMD64. 0.6.2 believed them. Any one true clue must be enough.
+    from audiochip.readers.ch341a import arch_from_signals
+    lies = {"env": "AMD64", "wow_native": 0x8664}
+    assert arch_from_signals(lies) == "amd64"
+    assert arch_from_signals({**lies, "arm64_attrs": 1}) == "arm64"
+    assert arch_from_signals({**lies, "reg_arch": "ARM64"}) == "arm64"
+    assert arch_from_signals({**lies, "ProcessorNameString": "Snapdragon(R) X 10-core X1P64100 @ 3.40 GHz"}) == "arm64"
+    assert arch_from_signals({**lies, "Identifier": "ARMv8 (64-bit) Family 8 Model 1 Revision 201"}) == "arm64"
+    assert arch_from_signals({"wow_native": 0xAA64}) == "arm64" and arch_from_signals({"env": "ARM64"}) == "arm64"
+    # a real Intel/AMD PC stays x64, including when ARM64 code is reported as not runnable
+    intel = {"env": "AMD64", "reg_arch": "AMD64", "wow_native": 0x8664, "arm64_attrs": 0,
+             "Identifier": "Intel64 Family 6 Model 154 Stepping 3", "ProcessorNameString": "12th Gen Intel(R) Core(TM) i7"}
+    assert arch_from_signals(intel) == "amd64"
+    assert arch_from_signals({"env": "x86"}) == "x86" and arch_from_signals({}) == "unknown"
