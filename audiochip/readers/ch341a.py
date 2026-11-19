@@ -34,6 +34,83 @@ def driver_cache_dir() -> Path:
     return base / "AudioChipDecoder" / "driver"
 
 
+WINUSB_VID, WINUSB_PID = 0x1A86, 0x5512          # the CH341A as seen on the USB bus
+
+# One-time steps for binding WinUSB by hand, used when the app has no bundled helper for this CPU.
+WINUSB_STEPS = (
+    "On this PC the reader works through Windows' built-in WinUSB driver (SPI chips only). "
+    "To switch it over once:\n"
+    "1. Download Zadig from zadig.akeo.ie and run it (it runs fine on an ARM PC).\n"
+    "2. Options menu, tick 'List All Devices'.\n"
+    "3. In the list pick 'USB-EPP/I2C CH341A' (USB ID 1A86 5512).\n"
+    "4. Set the target driver on the right to WinUSB, then press 'Replace Driver'.\n"
+    "5. Come back here and read the chip as normal."
+)
+
+
+def native_arch() -> str:
+    """The PC's real CPU family: 'arm64', 'amd64', 'x86' or 'unknown'.
+
+    On an ARM PC the app itself may be the x64 build running under emulation, so plain
+    platform checks report 'amd64'. IsWow64Process2 reports the true native machine.
+    AUDIOCHIP_ARCH overrides it, for testing and as an escape hatch.
+    """
+    forced = os.environ.get("AUDIOCHIP_ARCH")
+    if forced:
+        return forced.lower()
+    if sys.platform == "win32":
+        try:
+            k = ctypes.windll.kernel32
+            proc, native = ctypes.c_ushort(0), ctypes.c_ushort(0)
+            if k.IsWow64Process2(k.GetCurrentProcess(), ctypes.byref(proc), ctypes.byref(native)):
+                return {0xAA64: "arm64", 0x8664: "amd64", 0x014C: "x86"}.get(native.value, "unknown")
+        except Exception:
+            pass
+        env = (os.environ.get("PROCESSOR_ARCHITEW6432") or os.environ.get("PROCESSOR_ARCHITECTURE") or "").upper()
+        return {"ARM64": "arm64", "AMD64": "amd64", "X86": "x86"}.get(env, "unknown")
+    import platform
+    m = platform.machine().lower()
+    return {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64", "amd64": "amd64"}.get(m, m or "unknown")
+
+
+def driver_route(kind: str = "ch341a") -> str:
+    """Which driver path to offer: 'wch', 'winusb', or 'arm_unsupported'.
+
+    WCH's CH341/CH347 kernel driver has no ARM build and an x64 kernel driver cannot load on ARM
+    Windows. The CH341A has a WinUSB fallback in this app (SPI only), so on ARM it routes to
+    'winusb'. The CH347 has no WinUSB mode here, so on ARM there is no route for it.
+    """
+    if native_arch() == "arm64":
+        return "winusb" if kind == "ch341a" else "arm_unsupported"
+    return "wch"
+
+
+def winusb_helper() -> Path | None:
+    """The bundled WinUSB-install helper for this CPU, if one ships with the app."""
+    exe = Path(__file__).with_name("winusb") / native_arch() / "wdi-simple.exe"
+    return exe if exe.exists() else None
+
+
+def setup_winusb(progress: Progress | None = None) -> str:
+    """Bind the CH341A to WinUSB. Runs the bundled helper if present; otherwise explains the one-time steps.
+
+    Returns a short status when a helper was started. Raises ReaderError carrying WINUSB_STEPS when
+    no helper is bundled for this CPU, so the caller can show the manual route.
+    """
+    if sys.platform != "win32":
+        raise ReaderError("Binding WinUSB is a Windows-only step.")
+    helper = winusb_helper()
+    if helper is None:
+        raise DriverMissing(WINUSB_STEPS)
+    if progress:
+        progress(0, 0, "Installing the WinUSB driver")
+    args = f'--vid 0x{WINUSB_VID:04X} --pid 0x{WINUSB_PID:04X} --type 0 --name "CH341A"'
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(helper), args, str(helper.parent), 1)
+    if rc <= 32:
+        raise ReaderError("Windows did not start the WinUSB installer. It needs administrator permission.")
+    return "The WinUSB installer was started. Approve it, then replug the programmer."
+
+
 class DllTransport(FullDuplex):
     """Thin wrapper over WCH's CH341 library."""
 
@@ -226,6 +303,9 @@ def install_driver(progress: Progress | None = None) -> Path:
     import urllib.request
     import zipfile
 
+    if native_arch() == "arm64":
+        raise DriverMissing("WCH's CH341 driver has no version for ARM PCs such as this one, so it cannot be "
+                            "installed here. " + WINUSB_STEPS)
     target = driver_cache_dir()
     target.mkdir(parents=True, exist_ok=True)
     zpath = target / "CH341PAR.ZIP"

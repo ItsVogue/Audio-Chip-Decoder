@@ -198,6 +198,41 @@ def test_wav_bytes_reopen():
 
 
 # ---------------------------------------------------------------------- rate
+def _speech_evidence(true_rate, pitch_hz=120.0, voice_top_hz=3200.0):
+    """The evidence a real speech dump recorded at true_rate would produce (pitch and band edge)."""
+    from audiochip.rate import RateEvidence
+    e = RateEvidence()
+    e.frames, e.voiced = 200, 120
+    e.period = true_rate / pitch_hz
+    e.edge = voice_top_hz / (true_rate / 2)
+    e.speech_like = True
+    return e
+
+
+def test_recommended_speed_is_not_biased_slow_for_24k_and_12k_boards():
+    # Regression: 24,000 and 12,000 Hz used to be penalised as "uncommon" and lose to the
+    # next slower common rate (22,050 / 11,025), so the recommendation always came out slow.
+    from audiochip.rate import COMMON_RATES, estimate
+    assert {12000, 24000} <= COMMON_RATES
+    assert estimate([_speech_evidence(24000)]).best == 24000
+    assert estimate([_speech_evidence(12000)]).best == 12000
+    # the common mid rates with no near twin are unchanged (22,050 is the twin of 24,000, tested below)
+    for r in (8000, 16000, 32000):
+        assert estimate([_speech_evidence(r)]).best == r
+
+
+def test_a_near_neighbour_speed_is_always_offered_for_a_listen():
+    # 22,050 and 24,000 Hz are within ~8% and cannot be separated from pitch, so whichever the
+    # estimate names as best, the other must still be offered in the listening check.
+    from audiochip.rate import estimate
+    for true in (22050, 24000):
+        est = estimate([_speech_evidence(true)])
+        offered = est.top(3)
+        assert 22050 in offered and 24000 in offered, (true, offered)
+        assert true in offered and offered == sorted(offered)
+        assert "too close to tell apart" in est.reason
+
+
 def test_rate_shortlist_without_voice_is_marked_uninformed():
     from conftest import lowpass
     noise = lowpass(np.random.default_rng(3).normal(0, 4000, 96000), 0.9)

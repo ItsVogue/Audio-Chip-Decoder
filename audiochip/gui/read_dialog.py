@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFram
 
 from ..readers import Cancelled, DriverMissing, NoDevice, ReaderError, cards, xgecu
 from ..readers.base import read_verified
-from ..readers.ch341a import SPI_ONLY, install_driver, open_reader
+from ..readers.ch341a import (SPI_ONLY, driver_route, install_driver, open_reader, setup_winusb)
 from ..readers.serprog import list_ports
 from ..readers.chips import (I2C_TYPES, SPI_EEPROM_TYPES, SPI_FLASH_SIZES, ChipInfo, chip_from_marking,
                              human_size, i2c_chip, spi_eeprom_chip, spi_flash_chip)
@@ -515,10 +515,30 @@ class ReadDialog(FitDialog):
             with self._open() as r:
                 desc = r.describe()
         except DriverMissing as e:
-            self.reader_chip.set("Driver not installed", "low")
-            self.reader_text.setText(f"{e} Press Install the driver; it takes about a minute and is needed once."
-                                     if wch else str(e))
-            self.driver_btn.setVisible(wch)
+            route = driver_route(src) if wch else "wch"
+            if wch and route == "winusb":
+                self.reader_chip.set("Needs WinUSB", "low")
+                self.reader_text.setText("WCH's CH341 driver has no version for ARM PCs, so this reader uses "
+                                         "Windows' built-in WinUSB driver instead (SPI chips only). Press "
+                                         "'Set up WinUSB' to switch it over once.")
+                self.driver_btn.setText("Set up WinUSB")
+                self.driver_btn.setVisible(True)
+            elif wch and route == "arm_unsupported":
+                self.reader_chip.set("Not supported on ARM", "low")
+                self.reader_text.setText("The CH347 needs WCH's driver, which has no ARM version, and it has no "
+                                         "WinUSB mode in this app. On this ARM PC use a CH341A or an FT232H "
+                                         "board instead, or read on an Intel/AMD PC.")
+                self.driver_btn.setVisible(False)
+            elif wch:
+                self.reader_chip.set("Driver not installed", "low")
+                self.reader_text.setText(f"{e} Press Install the driver; it takes about a minute and is "
+                                         "needed once.")
+                self.driver_btn.setText("Install the driver")
+                self.driver_btn.setVisible(True)
+            else:
+                self.reader_chip.set("Driver not installed", "low")
+                self.reader_text.setText(str(e))
+                self.driver_btn.setVisible(False)
             self._reader_ok = False
         except NoDevice as e:
             self.reader_chip.set("Programmer not found", "low")
@@ -594,6 +614,10 @@ class ReadDialog(FitDialog):
             self.settings.setValue("serprog_port", self.port.currentData())
 
     def _install_driver(self) -> None:
+        if driver_route(self._src()) == "winusb":
+            self._setup_winusb()
+            return
+
         def done(setup):
             self._log(f"Started WCH driver installer: {setup}")
             self.status.setText("Driver installer started.")
@@ -604,6 +628,21 @@ class ReadDialog(FitDialog):
                                     "Then press OK here.")
             self._check_reader()
         self._run(lambda prog: install_driver(prog), done, "Downloading the driver from wch-ic.com...")
+
+    def _setup_winusb(self) -> None:
+        try:
+            msg = setup_winusb(lambda *a: None)
+        except DriverMissing as e:                       # no bundled helper: show the one-time manual steps
+            QMessageBox.information(self, "Set up WinUSB", str(e))
+            self._check_reader()
+            return
+        except ReaderError as e:
+            self._show_result(str(e), bad=True)
+            return
+        QMessageBox.information(self, "Set up WinUSB",
+                                msg + "\n\nWhen it has finished, unplug the programmer, plug it back in, "
+                                "then press OK here.")
+        self._check_reader()
 
     # ------------------------------------------------------------------- chip
     def _show_wiring(self) -> None:

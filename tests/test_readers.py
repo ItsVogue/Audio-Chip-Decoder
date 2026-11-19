@@ -422,3 +422,27 @@ def test_ft232h_i2c_reports_a_missing_chip_and_restores_spi_mode():
     with pytest.raises(ReaderError, match="No chip answered"):
         SerialReader(_ftdi_on_sim(sim)).read(i2c_chip(1))
     assert sim.three_phase is False and sim.divisor == 14 and sim.writes == 0
+
+
+# ------------------------------------------------------ ARM: WinUSB instead of WCH's driver
+def test_driver_route_and_winusb_guidance(monkeypatch):
+    from audiochip.readers import ch341a
+    from audiochip.readers.base import DriverMissing
+    monkeypatch.setenv("AUDIOCHIP_ARCH", "arm64")
+    assert ch341a.native_arch() == "arm64"
+    assert ch341a.driver_route("ch341a") == "winusb" and ch341a.driver_route("ch347") == "arm_unsupported"
+    assert ch341a.winusb_helper() is None                      # none bundled yet
+    # On ARM the WCH download must not even be attempted; it fails fast pointing at WinUSB.
+    with pytest.raises(DriverMissing) as e:
+        ch341a.install_driver()
+    assert "ARM" in str(e.value) and "WinUSB" in str(e.value)
+    assert "Zadig" in ch341a.WINUSB_STEPS and "1A86" in ch341a.WINUSB_STEPS
+    monkeypatch.setenv("AUDIOCHIP_ARCH", "amd64")
+    assert ch341a.driver_route("ch341a") == "wch"
+
+
+def test_native_arch_reads_the_override(monkeypatch):
+    from audiochip.readers import ch341a
+    for value, expect in (("arm64", "arm64"), ("amd64", "amd64"), ("x86", "x86")):
+        monkeypatch.setenv("AUDIOCHIP_ARCH", value)
+        assert ch341a.native_arch() == expect

@@ -400,6 +400,27 @@ def test_read_dialog_adapts_to_each_serial_reader(app, tmp_path, monkeypatch):
     d.close()
 
 
+def test_read_dialog_offers_winusb_on_an_arm_pc(app, tmp_path, monkeypatch):
+    # No simulated device, so the CH341A reader reports its driver is missing. On an ARM PC the
+    # button must offer WinUSB (WCH's driver has no ARM build), not the doomed WCH download.
+    from audiochip.gui.read_dialog import ReadDialog
+    monkeypatch.delenv("AUDIOCHIP_SIM", raising=False)
+    monkeypatch.setenv("AUDIOCHIP_ARCH", "arm64")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    d = ReadDialog(QSettings("AudioChipDecoder", "AudioChipDecoder"))
+    d.show()
+    d.source.setCurrentIndex(d.source.findData("ch341a"))
+    assert not d._reader_ok
+    assert d.driver_btn.isVisible() and d.driver_btn.text() == "Set up WinUSB"
+    assert "WinUSB" in d.reader_text.text()
+    monkeypatch.setenv("AUDIOCHIP_ARCH", "amd64")      # on x64 the same situation offers WCH's installer
+    d.source.setCurrentIndex(d.source.findData("ch347"))
+    d.source.setCurrentIndex(d.source.findData("ch341a"))
+    assert d.driver_btn.text() == "Install the driver"
+    d.open_after = []
+    d.close()
+
+
 # ------------------------------------------------------------------ 0.4.2 screens
 def test_gap_checkbox_switches_between_stream_and_restart(win):
     from audiochip.gui.dialogs import ListeningCheck

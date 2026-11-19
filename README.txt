@@ -1,4 +1,4 @@
-AUDIO CHIP DECODER 0.6.1
+AUDIO CHIP DECODER 0.6.2
 ========================
 
 Reads a memory chip, finds the audio stored on it, and exports audio files.
@@ -76,6 +76,22 @@ Raspberry Pi Pico or Arduino running serprog firmware  (SPI chips)
    Pick the board's COM port. pico-serprog and frser-duino are the usual
    firmwares.
 
+ON AN ARM PC  (Surface Pro 11, Snapdragon / Copilot+ laptops)
+   Windows on ARM cannot load the x64 kernel drivers these programmers
+   normally use, so:
+   - CH341A: WCH's driver has no ARM build. The app uses Windows' own
+     WinUSB driver instead - on the Read screen the button becomes "Set up
+     WinUSB". This reads 25-series SPI chips only (no 24-series I2C).
+   - FT232H / FT2232H: the smoothest choice on ARM. FTDI ships ARM drivers
+     (from ftdichip.com, "Windows (Desktop)" ARM64), and both SPI and I2C
+     work once that driver is installed.
+   - CH347: needs WCH's driver and has no WinUSB mode here, so it cannot be
+     used on ARM. Use a CH341A or FT232H, or read on an Intel/AMD PC.
+   - XGecu and serprog boards use their makers' USB-serial / WinUSB
+     drivers; serprog's COM-port driver has an ARM build, XGecu's may not.
+   None of the ARM paths have been tested by the author on an ARM machine
+   yet.
+
 Every reader reads twice and compares, reads a third time if they differ,
 and refuses to save a blank or unreliable read. For a sound spread over
 several chips, keep the same Track name and read them in order. Then press
@@ -109,7 +125,10 @@ DECODE AND EXPORT
   boards open, a speed can be set for one track only. "Change speed
   without a gap" keeps the sound unbroken while you drag; untick it to use
   Windows' basic player instead (a short gap at each change). Formats that
-  state their own speed (uPD7759, LPC speech) need no check.
+  state their own speed (uPD7759, LPC speech) need no check. The estimate
+  treats 12,000 and 24,000 Hz as ordinary speeds, so a 24 kHz board is no
+  longer nudged down to 22,050; where two speeds are within about 8% (such
+  as 22,050 and 24,000) it offers both and lets your ear decide.
 - "About this file" (or track) under the headline lists the facts: size,
   the chip types that size points to, sound data and filler, length,
   storage rate, loudest peak, average level, frequency range, fingerprint.

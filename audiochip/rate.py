@@ -22,7 +22,7 @@ import numpy as np
 from .detect import spectrum
 
 STANDARD_RATES = (4000, 5512, 6000, 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000)
-COMMON_RATES = {8000, 11025, 16000, 22050, 32000, 44100}
+COMMON_RATES = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100}  # incl. 12k and 24k: common toy/chip rates
 FALLBACK_NARROW = (8000, 11025, 16000)      # no voice, sound limited to part of the band
 FALLBACK_WIDE = (22050, 32000, 44100)       # no voice, sound fills the band (music, effects)
 
@@ -84,14 +84,23 @@ class RateEstimate:
         return self.shortlist[0].rate if self.shortlist else FALLBACK_WIDE[0]
 
     def top(self, n: int = 3) -> list[int]:
-        """The n best speeds that are far enough apart to tell apart by ear, slowest first."""
-        picked: list[int] = []
+        """The n best speeds to offer for a listening check, slowest first.
+
+        Normally these are spaced far enough apart to tell apart by ear. The one exception is a
+        near neighbour that scores almost as well as a speed already picked: two rates within
+        about 15% (such as 22,050 and 24,000 Hz) cannot be separated from pitch alone, so both
+        are offered and the ear decides, rather than the app guessing one and hiding the other.
+        """
+        picked: list[RateGuess] = []
         for g in self.shortlist:
-            if all(abs(math.log2(g.rate / r)) > 0.2 for r in picked):
-                picked.append(g.rate)
+            near = [p for p in picked if abs(math.log2(g.rate / p.rate)) <= 0.2]
+            keep = not near or (g.score >= 0.85 * near[0].score
+                                and all(abs(math.log2(g.rate / p.rate)) > 0.02 for p in picked))
+            if keep:
+                picked.append(g)
             if len(picked) == n:
                 break
-        return sorted(picked)
+        return sorted(p.rate for p in picked)
 
 
 def measure(x: np.ndarray) -> RateEvidence:
@@ -167,8 +176,14 @@ def estimate(evidence: list[RateEvidence]) -> RateEstimate:
     est.shortlist = guesses
     est.informed = True
     a, b = guesses[0], guesses[1]
+    twins = abs(math.log2(a.rate / b.rate)) <= 0.2        # within ~15%: not separable from pitch alone
     est.reason = (f"Based on {len(speech)} dump{'s' if len(speech) != 1 else ''} with a speaking voice. "
                   f"At {a.rate:,} Hz the voice pitch is {a.pitch_hz:.0f} Hz and speech energy reaches "
-                  f"{a.voice_top_hz / 1000:.1f} kHz. {b.rate:,} Hz is the next most likely. "
-                  "This is an estimate: confirm it with the listening check.")
+                  f"{a.voice_top_hz / 1000:.1f} kHz. "
+                  + (f"{a.rate:,} and {b.rate:,} Hz are within about {abs(a.rate - b.rate) * 100 // a.rate}% "
+                     "of each other, which is too close to tell apart from the sound alone, so both are offered "
+                     "below. Use the listening check to pick between them."
+                     if twins else
+                     f"{b.rate:,} Hz is the next most likely. This is an estimate: confirm it with the "
+                     "listening check."))
     return est
