@@ -445,7 +445,7 @@ class ReadDialog(FitDialog):
         for w in (self.read_btn, self.detect_btn, self.recheck_btn, self.driver_btn, self.decode_btn,
                   self.source, self.x_search, self.x_list):
             w.setEnabled(not on)
-        self.cancel_btn.setEnabled(on and self._src() != "xgecu")       # an XGecu read is left to finish
+        self.cancel_btn.setEnabled(on)
         if not on:
             self.decode_btn.setEnabled(bool(self.open_after))
             self.bar.setRange(0, 1)
@@ -785,7 +785,7 @@ class ReadDialog(FitDialog):
             verify, check_id = self.verify.isChecked(), self.x_id.isChecked()
 
             def xjob(prog):
-                return read_verified(lambda p: xgecu.read(name, None, p, check_id), prog, verify)
+                return read_verified(lambda p: xgecu.read(name, None, p, check_id, self._cancel.is_set), prog, verify)
             self._run(xjob, lambda res: self._chip_done(chip, *res), f"Reading {name}...")
         elif self._src() in SERIAL:
             chip = self._chosen_chip()

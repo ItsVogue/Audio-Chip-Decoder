@@ -464,3 +464,43 @@ def test_arm_is_recognised_even_when_windows_says_amd64_to_an_emulated_program()
              "Identifier": "Intel64 Family 6 Model 154 Stepping 3", "ProcessorNameString": "12th Gen Intel(R) Core(TM) i7"}
     assert arch_from_signals(intel) == "amd64"
     assert arch_from_signals({"env": "x86"}) == "x86" and arch_from_signals({}) == "unknown"
+
+
+# ------------------------------------------------ XGecu: a helper that stops answering
+def test_xgecu_read_that_hangs_is_abandoned_with_the_helpers_last_words(fake_xgecu, monkeypatch):
+    import time
+    seen = []
+    monkeypatch.setenv("FAKE_MINIPRO_MODE", "hang")
+    start = time.monotonic()
+    with pytest.raises(ReaderError) as e:
+        xgecu.read("AM27C020@DIP32", None, lambda i, n, t: seen.append(i), stall=1.5)
+    assert time.monotonic() - start < 20
+    msg = str(e.value)
+    assert "stopped answering at 25%" in msg and "Reading Code" in msg and "Unplug" in msg
+    assert seen and seen[-1] == 25
+    monkeypatch.setenv("FAKE_MINIPRO_MODE", "silent")
+    with pytest.raises(ReaderError) as e:
+        xgecu.read("AM27C020@DIP32", None, None, stall=1.5)
+    assert "stopped answering" in str(e.value)
+
+
+def test_xgecu_read_can_be_stopped(fake_xgecu, monkeypatch):
+    import threading
+    import time
+    from audiochip.readers import Cancelled
+    monkeypatch.setenv("FAKE_MINIPRO_MODE", "hang")
+    stop = threading.Event()
+    threading.Timer(0.8, stop.set).start()
+    start = time.monotonic()
+    with pytest.raises(Cancelled):
+        xgecu.read("AM27C020@DIP32", None, None, cancelled=stop.is_set)
+    assert time.monotonic() - start < 15
+
+
+def test_xgecu_read_still_reports_smooth_progress_and_data(fake_xgecu, monkeypatch):
+    expected, _ = fake_xgecu
+    monkeypatch.setenv("FAKE_MINIPRO_MODE", "ok")
+    seen = []
+    data = xgecu.read("AM27C020@DIP32", None, lambda i, n, t: seen.append((i, n)))
+    assert data == expected
+    assert seen and seen[-1] == (99, 100) and all(n == 100 for _, n in seen)

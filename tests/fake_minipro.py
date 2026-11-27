@@ -36,6 +36,12 @@ if "-p" in args and "-r" in args:
     for pct in (3, 25, 50, 75, 99):
         sys.stderr.write("\r\x1b[KReading Code...  %2d%%" % pct)
         sys.stderr.flush()
+        if mode == "hang" and pct == 25:           # a programmer that stops answering part-way
+            import time
+            time.sleep(120)
+    if mode == "silent":                            # one that never says anything at all
+        import time
+        time.sleep(120)
     sys.stderr.write("\r\x1b[KReading Code...  0.52 Sec  OK\n")
     open(out, "wb").write(data)
     with open(os.environ.get("FAKE_MINIPRO_LOG", os.devnull), "a") as log:

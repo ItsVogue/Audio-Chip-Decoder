@@ -14,13 +14,15 @@ import os
 import re
 import shlex
 import shutil
+import threading
+import time
 import subprocess
 import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
 
-from .base import DriverMissing, NoDevice, Progress, ReaderError
+from .base import Cancelled, DriverMissing, NoDevice, Progress, ReaderError
 
 HERE = Path(__file__).with_name("xgecu")
 # key printed by "minipro -k"  ->  (name shown, option for -q, chip index family)
@@ -152,39 +154,93 @@ def search(family: str, text: str, limit: int = 250, package: str | None = None)
     return [(n, s, i) for _, n, s, i in hits[:limit]]
 
 
+STALL_SECONDS = 45          # the helper reports progress several times a second; this long without a word is a hang
+
+
+def _stop(proc) -> None:
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def read(device: str, model_opt: str | None = None, progress: Progress | None = None,
-         check_id: bool = False) -> bytes:
+         check_id: bool = False, cancelled=None, stall: float | None = None) -> bytes:
     """Read a chip once. `device` is a name from the chip index, e.g. "AM27C020@DIP32".
 
     check_id=False passes -x, so no ID request is made. On EPROMs an ID request puts 12 V on
     address pin A9, which a plain read never needs.
+
+    The helper is watched while it runs: if it says nothing for `stall` seconds it is stopped and
+    the last thing it said is reported, and `cancelled()` returning True stops it at once. It is
+    never left running with the window waiting on it.
     """
+    stall = STALL_SECONDS if stall is None else stall
     tmp = Path(tempfile.mkdtemp(prefix="audiochip_x_")) / "read.bin"
     args = _tool() + ["-p", device, "-r", str(tmp), "-z"] + ([] if check_id else ["-x"])
     try:
-        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=_env(),
-                                cwd=_cwd(), creationflags=_flags())
+        proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                env=_env(), cwd=_cwd(), creationflags=_flags())
     except OSError as e:
+        shutil.rmtree(tmp.parent, ignore_errors=True)
         raise ReaderError(f"The XGecu reader component could not be started: {e}") from None
     captured = bytearray()
-    while True:
-        chunk = proc.stderr.read(64)
-        if not chunk:
-            break
-        captured += chunk
-        if progress:
-            last = None
-            for last in _PROGRESS.finditer(captured[-200:].decode("latin1")):
-                pass
-            if last:
-                progress(min(int(last.group(2)), 100), 100, "")
-    code = proc.wait()
-    text = _clean(captured.decode("utf-8", "replace"))
+    heard = [time.monotonic()]
+
+    def pump():
+        fd = proc.stderr.fileno()
+        try:
+            while True:
+                chunk = os.read(fd, 4096)              # returns as soon as anything arrives
+                if not chunk:
+                    break
+                captured.extend(chunk)
+                heard[0] = time.monotonic()
+        except OSError:
+            pass
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    shown = -1
     try:
+        while reader.is_alive():
+            reader.join(0.1)
+            last = None
+            for last in _PROGRESS.finditer(bytes(captured[-200:]).decode("latin1")):
+                pass
+            if last and progress and int(last.group(2)) != shown:
+                shown = min(int(last.group(2)), 100)
+                progress(shown, 100, "")
+            if cancelled and cancelled():
+                _stop(proc)
+                raise Cancelled("Stopped. If a chip is in the socket, unplug the programmer's USB cable for a "
+                                "moment before removing it: the socket may still be powered.")
+            if time.monotonic() - heard[0] > stall:
+                _stop(proc)
+                said = _clean(bytes(captured).decode("utf-8", "replace")).strip()
+                where = f"at {shown}%" if shown >= 0 else "before any data arrived"
+                raise ReaderError(
+                    f"The programmer stopped answering {where} and the read was abandoned after {stall:.0f} "
+                    "seconds of silence. Unplug the programmer's USB cable, plug it back in, reseat the chip and "
+                    "try again. If it stops at the same place every time, the chip type chosen probably does not "
+                    "match the chip, or this programmer's firmware is newer than the reader component knows.\n"
+                    "The programmer's last words:\n" + ("\n".join(said.splitlines()[-6:]) or "(nothing)"))
+        code = proc.wait()
+        text = _clean(bytes(captured).decode("utf-8", "replace"))
         if code != 0 or not tmp.exists():
             raise ReaderError(_explain(text, device))
         data = tmp.read_bytes()
     finally:
+        if proc.poll() is None:
+            _stop(proc)
+        try:
+            proc.stderr.close()
+        except OSError:
+            pass
         shutil.rmtree(tmp.parent, ignore_errors=True)
     if not data:
         raise ReaderError("The programmer returned no data.\n" + text[-300:])
